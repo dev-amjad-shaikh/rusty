@@ -870,8 +870,13 @@ pub(crate) async fn query_knowledge(
         )
         .await
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let mut results: Vec<Value> = results.iter().map(|r| serde_json::to_value(r).unwrap_or(Value::Null)).collect();
-    let note = crate::knowledge_conflicts::annotate(&state.server_store, tenant.tenant(), &mut results).await;
+    let mut results: Vec<Value> = results
+        .iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+        .collect();
+    let note =
+        crate::knowledge_conflicts::annotate(&state.server_store, tenant.tenant(), &mut results)
+            .await;
     let mut out = json!({
         "query": payload.text,
         "results": results,
@@ -958,7 +963,9 @@ pub(crate) async fn retire_source(
         .retire(&source_id, Utc::now())
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("no version of source `{source_id}` is held")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("no version of source `{source_id}` is held"))
+        })?;
     tracing::info!(%source_id, by = %tenant.principal().id, "knowledge source retired");
     Ok(Json(json!({"retired": true, "tombstone": tombstone})))
 }
@@ -1047,12 +1054,19 @@ impl GovernedKnowledgeSearchTool {
     /// until [`ServerConfig::with_knowledge_tool`](crate::ServerConfig::with_knowledge_tool)
     /// hands it the tenant's plane, then the plane is the answer. The same
     /// `Arc` is registered into the graph and given to the config.
-    pub fn late_bound(fallback: Vec<KnowledgeDocument>) -> rusty_agent_runtime::error::Result<Arc<Self>> {
+    pub fn late_bound(
+        fallback: Vec<KnowledgeDocument>,
+    ) -> rusty_agent_runtime::error::Result<Arc<Self>> {
         Ok(Arc::new(Self::in_memory(fallback)?))
     }
 
     /// Bind the plane for `tenant` at its tenant scope. Idempotent.
-    pub(crate) fn bind(&self, plane: Arc<KnowledgePlane>, store: Arc<dyn crate::server_store::ServerStore>, tenant: &str) {
+    pub(crate) fn bind(
+        &self,
+        plane: Arc<KnowledgePlane>,
+        store: Arc<dyn crate::server_store::ServerStore>,
+        tenant: &str,
+    ) {
         let base = KnowledgeBase::new(Arc::new(ServerKnowledgeStore::new(plane, tenant)));
         let scope = ScopeAddress::new(MemoryScope::Tenant, tenant);
         if let Ok(mut b) = self.bound.write() {
@@ -1137,14 +1151,19 @@ impl Tool for GovernedKnowledgeSearchTool {
                 })
             })
             .collect();
-        let classes: std::collections::BTreeSet<&str> = results.iter().map(|r| r.citation.provenance.label()).collect();
+        let classes: std::collections::BTreeSet<&str> = results
+            .iter()
+            .map(|r| r.citation.provenance.label())
+            .collect();
         let mut notes: Vec<String> = Vec::new();
         if classes.len() > 1 {
             notes.push("Results are ranked by provenance first: the organization's own policy and records, then vendor documentation, then generic guidance. Where they disagree, the organization's own stands — never let generic guidance outrank it.".to_owned());
         }
         let conflicts = self.conflicts.read().ok().and_then(|c| c.clone());
         if let Some((store, tenant)) = conflicts {
-            if let Some(note) = crate::knowledge_conflicts::annotate(&store, &tenant, &mut rendered).await {
+            if let Some(note) =
+                crate::knowledge_conflicts::annotate(&store, &tenant, &mut rendered).await
+            {
                 notes.push(note);
             }
         }

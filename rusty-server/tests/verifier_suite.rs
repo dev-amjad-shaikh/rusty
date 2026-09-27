@@ -28,8 +28,17 @@ struct Scripted(Script);
 #[async_trait]
 impl ChatModel for Scripted {
     async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> RustyResult<ChatResponse> {
-        let message = self.0.lock().unwrap().pop_front().ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
-        Ok(ChatResponse { message, model: Some("scripted".into()), usage: None })
+        let message = self
+            .0
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
+        Ok(ChatResponse {
+            message,
+            model: Some("scripted".into()),
+            usage: None,
+        })
     }
 }
 
@@ -55,7 +64,10 @@ impl Tool for Echo {
 }
 
 fn app() -> (Router, PathBuf, Script, Script) {
-    let store = std::env::temp_dir().join(format!("rusty-server-verifier-suite-{}", uuid::Uuid::new_v4()));
+    let store = std::env::temp_dir().join(format!(
+        "rusty-server-verifier-suite-{}",
+        uuid::Uuid::new_v4()
+    ));
     let agent: Script = Arc::new(Mutex::new(VecDeque::new()));
     let judge: Script = Arc::new(Mutex::new(VecDeque::new()));
     let mut tools = ToolRegistry::new();
@@ -63,8 +75,11 @@ fn app() -> (Router, PathBuf, Script, Script) {
     let graph = create_react_agent(Arc::new(Scripted(Arc::clone(&agent))), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react", graph, spec, &tools).unwrap();
-    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()).with_verifier(Arc::new(Scripted(Arc::clone(&judge))));
+    registry
+        .register_with_tools("react", graph, spec, &tools)
+        .unwrap();
+    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())
+        .with_verifier(Arc::new(Scripted(Arc::clone(&judge))));
     (router(registry, config), store, agent, judge)
 }
 
@@ -77,14 +92,23 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn judge_line(verdict: &str) -> ChatMessage {
-    ChatMessage::assistant(format!("{{\"verdict\": \"{verdict}\", \"reason\": \"scripted\"}}"))
+    ChatMessage::assistant(format!(
+        "{{\"verdict\": \"{verdict}\", \"reason\": \"scripted\"}}"
+    ))
 }
 
 /// One run: echo, then a reply; the judge says `verdict`.
@@ -93,11 +117,21 @@ async fn one_run(app: &Router, agent: &Script, judge: &Script, verdict: &str) ->
 }
 
 /// The same, as `assistant` when one is named.
-async fn run_as(app: &Router, agent: &Script, judge: &Script, verdict: &str, assistant: Option<&str>) -> Value {
+async fn run_as(
+    app: &Router,
+    agent: &Script,
+    judge: &Script,
+    verdict: &str,
+    assistant: Option<&str>,
+) -> Value {
     // A failed verdict sends the model back for one repair turn, and the
     // judge reads that turn too: both scripts carry the extra line.
     *agent.lock().unwrap() = VecDeque::from(vec![
-        ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "echo", json!({"text": "hello"}))]),
+        ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+            "c1",
+            "echo",
+            json!({"text": "hello"}),
+        )]),
         ChatMessage::assistant("The echo said: hello."),
         ChatMessage::assistant("The echo said: hello."),
     ]);
@@ -111,7 +145,13 @@ async fn run_as(app: &Router, agent: &Script, judge: &Script, verdict: &str, ass
     if let Some(assistant) = assistant {
         body["assistant_id"] = json!(assistant);
     }
-    let (status, run) = call(app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(body)).await;
+    let (status, run) = call(
+        app,
+        "POST",
+        &format!("/threads/{thread_id}/runs/wait"),
+        Some(body),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{run}");
     assert_eq!(run["verification"]["verdict"], verdict, "{run}");
     run
@@ -141,17 +181,42 @@ async fn a_persons_word_on_a_verdict_is_a_case_and_the_judge_is_measured_against
     // carries no transcript; the kept one does.
     let good = one_run(&app, &agent, &judge, "verified").await;
     let bad = one_run(&app, &agent, &judge, "failed").await;
-    assert!(good["verification"].get("transcript").is_none(), "the served verdict leaves the transcript out: {}", good["verification"]);
+    assert!(
+        good["verification"].get("transcript").is_none(),
+        "the served verdict leaves the transcript out: {}",
+        good["verification"]
+    );
 
     // A person agrees with the first and calls the second wrong.
-    let (status, r) = call(&app, "POST", &format!("/runs/{}/verdict/review", good["run_id"].as_str().unwrap()), Some(json!({"agree": true}))).await;
+    let (status, r) = call(
+        &app,
+        "POST",
+        &format!("/runs/{}/verdict/review", good["run_id"].as_str().unwrap()),
+        Some(json!({"agree": true})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{r}");
     assert_eq!(r["review"]["verdict_right"], "verified");
-    let (status, r) = call(&app, "POST", &format!("/runs/{}/verdict/review", bad["run_id"].as_str().unwrap()), Some(json!({"agree": false, "note": "the echo did say hello"}))).await;
+    let (status, r) = call(
+        &app,
+        "POST",
+        &format!("/runs/{}/verdict/review", bad["run_id"].as_str().unwrap()),
+        Some(json!({"agree": false, "note": "the echo did say hello"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{r}");
-    assert_eq!(r["review"]["verdict_right"], "verified", "wrong defaults to the other verdict: {r}");
+    assert_eq!(
+        r["review"]["verdict_right"], "verified",
+        "wrong defaults to the other verdict: {r}"
+    );
     assert_eq!(r["reviews"], 2);
-    let (status, r) = call(&app, "POST", "/runs/no-such-run/verdict/review", Some(json!({"agree": true}))).await;
+    let (status, r) = call(
+        &app,
+        "POST",
+        "/runs/no-such-run/verdict/review",
+        Some(json!({"agree": true})),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{r}");
 
     // Judged again with a judge that verifies everything: it agrees with
@@ -162,7 +227,11 @@ async fn a_persons_word_on_a_verdict_is_a_case_and_the_judge_is_measured_against
     assert_eq!(started["total"], 2);
     let ev = judged(&app).await;
     assert_eq!(ev["latest"]["agreed"], 2, "{}", ev["latest"]);
-    assert_eq!(ev["latest"]["cases"][0]["asked"], "say hello", "{}", ev["latest"]["cases"][0]);
+    assert_eq!(
+        ev["latest"]["cases"][0]["asked"], "say hello",
+        "{}",
+        ev["latest"]["cases"][0]
+    );
     assert_eq!(ev["reviews"], 2);
     assert_eq!(ev["disagreed"], 1);
 
@@ -181,19 +250,34 @@ async fn a_persons_word_on_a_verdict_is_a_case_and_the_judge_is_measured_against
 
     // A judge that gives no verdict (nothing it could parse) is not a
     // disagreement: the case is skipped and left out of the ratio.
-    *judge.lock().unwrap() = VecDeque::from(vec![ChatMessage::assistant("I cannot say."), judge_line("verified")]);
+    *judge.lock().unwrap() = VecDeque::from(vec![
+        ChatMessage::assistant("I cannot say."),
+        judge_line("verified"),
+    ]);
     let (status, _) = call(&app, "POST", "/verifier/evaluations", None).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     let ev = judged(&app).await;
     assert_eq!(ev["latest"]["judged"], 1, "{}", ev["latest"]);
     assert_eq!(ev["latest"]["agreed"], 1);
-    assert!(ev["latest"]["cases"][0]["skipped"].as_str().is_some_and(|s| s.contains("no verdict")), "{}", ev["latest"]["cases"][0]);
+    assert!(
+        ev["latest"]["cases"][0]["skipped"]
+            .as_str()
+            .is_some_and(|s| s.contains("no verdict")),
+        "{}",
+        ev["latest"]["cases"][0]
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
 
 async fn review(app: &Router, id: String) {
-    let (status, r) = call(app, "POST", &format!("/runs/{id}/verdict/review"), Some(json!({"agree": true}))).await;
+    let (status, r) = call(
+        app,
+        "POST",
+        &format!("/runs/{id}/verdict/review"),
+        Some(json!({"agree": true})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{r}");
 }
 
@@ -201,15 +285,34 @@ async fn review(app: &Router, id: String) {
 /// takes the desk's script, and the judge's verdict on it.
 async fn judge_candidate(app: &Router, agent: &Script, judge: &Script, version_id: String) {
     *agent.lock().unwrap() = VecDeque::from(vec![
-        ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "echo", json!({"text": "hello"}))]),
+        ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+            "c1",
+            "echo",
+            json!({"text": "hello"}),
+        )]),
         ChatMessage::assistant("The echo said: hello."),
     ]);
     *judge.lock().unwrap() = VecDeque::from(vec![judge_line("verified")]);
-    let (status, judged) = call(app, "POST", &format!("/assistants/desk/versions/{version_id}/evidence"), None).await;
+    let (status, judged) = call(
+        app,
+        "POST",
+        &format!("/assistants/desk/versions/{version_id}/evidence"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{judged}");
     for _ in 0..400 {
-        let (_, list) = call(app, "GET", "/datasets/desk-echo/versions/1/evaluations", None).await;
-        if list["evaluations"].as_array().is_some_and(|e| e.iter().any(|x| x["assistant_version_id"] == version_id && x["status"] == "done")) {
+        let (_, list) = call(
+            app,
+            "GET",
+            "/datasets/desk-echo/versions/1/evaluations",
+            None,
+        )
+        .await;
+        if list["evaluations"].as_array().is_some_and(|e| {
+            e.iter()
+                .any(|x| x["assistant_version_id"] == version_id && x["status"] == "done")
+        }) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -229,7 +332,13 @@ async fn a_candidate_auto_applies_only_when_the_gate_passes_and_the_verifier_sta
 
     // A suite recorded from the desk: one run becomes a case that expects the echo.
     let run = run_as(&app, &agent, &judge, "verified", Some("desk")).await;
-    let (_, kept) = call(&app, "GET", &format!("/runs/{}", run["run_id"].as_str().unwrap()), None).await;
+    let (_, kept) = call(
+        &app,
+        "GET",
+        &format!("/runs/{}", run["run_id"].as_str().unwrap()),
+        None,
+    )
+    .await;
     let (status, dataset) = call(&app, "POST", "/datasets", Some(json!({"name": "desk-echo", "version": "1", "cases": [{
         "id": "echo-first",
         "input": kept["input"],
@@ -255,14 +364,28 @@ async fn a_candidate_auto_applies_only_when_the_gate_passes_and_the_verifier_sta
     judge_candidate(&app, &agent, &judge, v2.clone()).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     let (_, a) = call(&app, "GET", "/assistants/desk", None).await;
-    assert_eq!(a["active_version_id"], json!(v1), "held for a person: the verifier has four reviews, not five: {a}");
-    let (_, evidence) = call(&app, "GET", &format!("/assistants/desk/versions/{v2}/evidence"), None).await;
-    assert_eq!(evidence["evidence"]["ok"], true, "the gate itself passed: {evidence}");
+    assert_eq!(
+        a["active_version_id"],
+        json!(v1),
+        "held for a person: the verifier has four reviews, not five: {a}"
+    );
+    let (_, evidence) = call(
+        &app,
+        "GET",
+        &format!("/assistants/desk/versions/{v2}/evidence"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        evidence["evidence"]["ok"], true,
+        "the gate itself passed: {evidence}"
+    );
 
     // The fifth review, and a judging that agrees with everyone: the floor stands.
     let r = one_run(&app, &agent, &judge, "verified").await;
     review(&app, r["run_id"].as_str().unwrap().to_owned()).await;
-    *judge.lock().unwrap() = VecDeque::from((0..5).map(|_| judge_line("verified")).collect::<Vec<_>>());
+    *judge.lock().unwrap() =
+        VecDeque::from((0..5).map(|_| judge_line("verified")).collect::<Vec<_>>());
     let (status, _) = call(&app, "POST", "/verifier/evaluations", None).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     let ev = judged(&app).await;
@@ -283,8 +406,18 @@ async fn a_candidate_auto_applies_only_when_the_gate_passes_and_the_verifier_sta
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert_eq!(active, json!(v3), "the candidate gate activated it");
-    let (_, evidence) = call(&app, "GET", &format!("/assistants/desk/versions/{v3}/evidence"), None).await;
-    assert_eq!(evidence["promotions"][0]["by"]["principal_id"], "candidate-gate", "{}", evidence["promotions"]);
+    let (_, evidence) = call(
+        &app,
+        "GET",
+        &format!("/assistants/desk/versions/{v3}/evidence"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        evidence["promotions"][0]["by"]["principal_id"], "candidate-gate",
+        "{}",
+        evidence["promotions"]
+    );
     assert_eq!(evidence["promotions"][0]["by"]["floor"]["stands"], true);
 
     let _ = std::fs::remove_dir_all(store);

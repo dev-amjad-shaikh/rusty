@@ -567,7 +567,12 @@ async fn a_skill_leaves_the_library_but_its_history_stays() {
     assert_eq!(status, StatusCode::OK, "{v}");
     assert!(v["removed"]["removed_at"].is_string(), "{v}");
     let (_, listed) = call(&app, "GET", "/skills", None).await;
-    let names: Vec<_> = listed["skills"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+    let names: Vec<_> = listed["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names, ["kept-skill"]);
     // Its history stays: a run that used it still replays.
     let (status, detail) = call(&app, "GET", "/skills/weather-check", None).await;
@@ -576,8 +581,14 @@ async fn a_skill_leaves_the_library_but_its_history_stays() {
     let (_, body) = call(&app, "GET", "/skills/weather-check/body", None).await;
     assert_eq!(body["body"], json!("Read the forecast.\n"));
     // Removing it again, or a skill that never was, is a 404.
-    assert_eq!(call(&app, "DELETE", "/skills/weather-check", None).await.0, StatusCode::NOT_FOUND);
-    assert_eq!(call(&app, "DELETE", "/skills/never-was", None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        call(&app, "DELETE", "/skills/weather-check", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(&app, "DELETE", "/skills/never-was", None).await.0,
+        StatusCode::NOT_FOUND
+    );
     drop(app);
 
     // A restart keeps it out; registering the name again brings it back.
@@ -597,8 +608,16 @@ struct SilentModel;
 
 #[async_trait::async_trait]
 impl rusty_agent_runtime::prelude::ChatModel for SilentModel {
-    async fn chat(&self, _messages: &[rusty_agent_runtime::prelude::ChatMessage], _tools: &[Value]) -> rusty_agent_runtime::prelude::Result<rusty_agent_runtime::prelude::ChatResponse> {
-        Ok(rusty_agent_runtime::prelude::ChatResponse { message: rusty_agent_runtime::prelude::ChatMessage::assistant("ok"), model: None, usage: None })
+    async fn chat(
+        &self,
+        _messages: &[rusty_agent_runtime::prelude::ChatMessage],
+        _tools: &[Value],
+    ) -> rusty_agent_runtime::prelude::Result<rusty_agent_runtime::prelude::ChatResponse> {
+        Ok(rusty_agent_runtime::prelude::ChatResponse {
+            message: rusty_agent_runtime::prelude::ChatMessage::assistant("ok"),
+            model: None,
+            usage: None,
+        })
     }
 }
 
@@ -609,19 +628,38 @@ async fn a_skill_an_agent_uses_stays_and_the_refusal_names_the_agent() {
     let tools = ToolRegistry::new();
     let graph = create_react_agent(std::sync::Arc::new(SilentModel), tools.clone()).unwrap();
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("capable", graph, StateSpec::new().channel("messages", Reducer::AddMessages), &tools).unwrap();
-    let app = router(registry, ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()));
+    registry
+        .register_with_tools(
+            "capable",
+            graph,
+            StateSpec::new().channel("messages", Reducer::AddMessages),
+            &tools,
+        )
+        .unwrap();
+    let app = router(
+        registry,
+        ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()),
+    );
     publish(&app, "weather-check", "Read the forecast.").await;
-    let (status, v) = call(&app, "POST", "/assistants", Some(json!({
-        "assistant_id": "desk",
-        "name": "Weather Desk",
-        "graph": "capable",
-        "config": {"studio_intent": {"instructions": "Answer.", "skills": ["weather-check"]}},
-    }))).await;
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/assistants",
+        Some(json!({
+            "assistant_id": "desk",
+            "name": "Weather Desk",
+            "graph": "capable",
+            "config": {"studio_intent": {"instructions": "Answer.", "skills": ["weather-check"]}},
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{v}");
     let (status, v) = call(&app, "DELETE", "/skills/weather-check", None).await;
     assert_eq!(status, StatusCode::CONFLICT, "{v}");
-    assert!(v.to_string().contains("Weather Desk still uses this skill"), "{v}");
+    assert!(
+        v.to_string().contains("Weather Desk still uses this skill"),
+        "{v}"
+    );
     let (_, listed) = call(&app, "GET", "/skills", None).await;
     assert_eq!(listed["skills"].as_array().unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(store);

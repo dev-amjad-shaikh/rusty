@@ -84,9 +84,19 @@ pub struct Backup {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum RestoreOutcome {
-    Restored { archive: String, manifest: Option<Manifest>, files: u64 },
-    Skipped { archive: String, reason: String },
-    Failed { archive: String, reason: String },
+    Restored {
+        archive: String,
+        manifest: Option<Manifest>,
+        files: u64,
+    },
+    Skipped {
+        archive: String,
+        reason: String,
+    },
+    Failed {
+        archive: String,
+        reason: String,
+    },
 }
 
 /// The estate's own handle on the store and where its backups go.
@@ -98,27 +108,53 @@ pub struct EstatePlane {
 }
 
 impl EstatePlane {
-    pub fn new(store_path: &Path, backup_dir: Option<&Path>, restore: Option<RestoreOutcome>) -> Self {
-        let backup_dir = backup_dir.map(Path::to_path_buf).unwrap_or_else(|| default_backup_dir(store_path));
-        Self { store_path: store_path.to_path_buf(), backup_dir, restore }
+    pub fn new(
+        store_path: &Path,
+        backup_dir: Option<&Path>,
+        restore: Option<RestoreOutcome>,
+    ) -> Self {
+        let backup_dir = backup_dir
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| default_backup_dir(store_path));
+        Self {
+            store_path: store_path.to_path_buf(),
+            backup_dir,
+            restore,
+        }
     }
 }
 
 /// `{parent}/{store dir}-backups`, beside the store — never inside it.
 pub fn default_backup_dir(store_path: &Path) -> PathBuf {
-    let name = store_path.file_name().and_then(|n| n.to_str()).unwrap_or("store");
-    store_path.parent().unwrap_or(Path::new(".")).join(format!("{name}-backups"))
+    let name = store_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("store");
+    store_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(format!("{name}-backups"))
 }
 
 /// The `.json` files directly in `dir`, none from its subdirectories.
 fn count_files_here(dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    entries.flatten().filter(|e| { let p = e.path(); p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("json") }).count() as u64
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let p = e.path();
+            p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("json")
+        })
+        .count() as u64
 }
 
 fn count_files(dir: &Path) -> u64 {
     let mut n = 0;
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -137,7 +173,11 @@ pub fn counts(store_path: &Path) -> Counts {
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .map(|v| match v {
             Value::Array(list) => list.len() as u64,
-            Value::Object(map) => map.get("users").and_then(Value::as_array).map(|l| l.len() as u64).unwrap_or(map.len() as u64),
+            Value::Object(map) => map
+                .get("users")
+                .and_then(Value::as_array)
+                .map(|l| l.len() as u64)
+                .unwrap_or(map.len() as u64),
             _ => 0,
         })
         .unwrap_or(0);
@@ -152,12 +192,23 @@ pub fn counts(store_path: &Path) -> Counts {
         connections: count_files(&store_path.join("connections")),
         memories: count_files(&store_path.join("memory")),
         approvals: count_files(&store_path.join("approvals")),
-        people_forgotten: std::fs::read_dir(crate::receipts::keys_dir(store_path)).map(|d| d.flatten().filter(|e| { let n = e.file_name().to_string_lossy().into_owned(); n.starts_with("person.") && n.ends_with(".forgotten.json") }).count() as u64).unwrap_or(0),
+        people_forgotten: std::fs::read_dir(crate::receipts::keys_dir(store_path))
+            .map(|d| {
+                d.flatten()
+                    .filter(|e| {
+                        let n = e.file_name().to_string_lossy().into_owned();
+                        n.starts_with("person.") && n.ends_with(".forgotten.json")
+                    })
+                    .count() as u64
+            })
+            .unwrap_or(0),
     }
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -181,8 +232,14 @@ pub fn take_backup(store_path: &Path, backup_dir: &Path, by: Value) -> Result<Ba
     all.sort();
     // Person keys travel apart: the data archive holds a person's records
     // sealed, and only the sibling person-keys archive can open them.
-    let (person_keys, files): (Vec<PathBuf>, Vec<PathBuf>) = all.into_iter().partition(|f| crate::vault::PersonVault::is_key_file(f));
-    let bytes: u64 = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
+    let (person_keys, files): (Vec<PathBuf>, Vec<PathBuf>) = all
+        .into_iter()
+        .partition(|f| crate::vault::PersonVault::is_key_file(f));
+    let bytes: u64 = files
+        .iter()
+        .filter_map(|f| std::fs::metadata(f).ok())
+        .map(|m| m.len())
+        .sum();
     let manifest = Manifest {
         taken_at,
         by,
@@ -193,19 +250,24 @@ pub fn take_backup(store_path: &Path, backup_dir: &Path, by: Value) -> Result<Ba
         bytes,
         person_keys: person_keys.len() as u64,
     };
-    std::fs::create_dir_all(backup_dir).map_err(|e| format!("the backup directory could not be made: {e}"))?;
+    std::fs::create_dir_all(backup_dir)
+        .map_err(|e| format!("the backup directory could not be made: {e}"))?;
     // Two backups in one second must not be one file: the second takes a
     // numbered name.
     let mut name = archive_name(taken_at);
     let mut nth = 1;
     while backup_dir.join(&name).exists() {
         nth += 1;
-        name = format!("{}.{nth}.tar.gz", archive_name(taken_at).trim_end_matches(".tar.gz"));
+        name = format!(
+            "{}.{nth}.tar.gz",
+            archive_name(taken_at).trim_end_matches(".tar.gz")
+        );
     }
     let path = backup_dir.join(&name);
     let tmp = backup_dir.join(format!("{name}.tmp"));
     {
-        let file = File::create(&tmp).map_err(|e| format!("the archive could not be created: {e}"))?;
+        let file =
+            File::create(&tmp).map_err(|e| format!("the archive could not be created: {e}"))?;
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut tar = tar::Builder::new(encoder);
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -214,19 +276,28 @@ pub fn take_backup(store_path: &Path, backup_dir: &Path, by: Value) -> Result<Ba
         header.set_mode(0o600);
         header.set_mtime(taken_at.timestamp() as u64);
         header.set_cksum();
-        tar.append_data(&mut header, MANIFEST, manifest_bytes.as_slice()).map_err(|e| format!("manifest: {e}"))?;
+        tar.append_data(&mut header, MANIFEST, manifest_bytes.as_slice())
+            .map_err(|e| format!("manifest: {e}"))?;
         for file in &files {
-            let Ok(relative) = file.strip_prefix(store_path) else { continue };
+            let Ok(relative) = file.strip_prefix(store_path) else {
+                continue;
+            };
             // A file that vanished since the walk (a rename in flight) is
             // simply not in this backup; the record it was replacing is.
-            let Ok(mut handle) = File::open(file) else { continue };
+            let Ok(mut handle) = File::open(file) else {
+                continue;
+            };
             let name = Path::new(STORE_PREFIX).join(relative);
             if let Err(error) = tar.append_file(&name, &mut handle) {
                 return Err(format!("{}: {error}", relative.display()));
             }
         }
-        let encoder = tar.into_inner().map_err(|e| format!("the archive could not be finished: {e}"))?;
-        let mut file = encoder.finish().map_err(|e| format!("the archive could not be compressed: {e}"))?;
+        let encoder = tar
+            .into_inner()
+            .map_err(|e| format!("the archive could not be finished: {e}"))?;
+        let mut file = encoder
+            .finish()
+            .map_err(|e| format!("the archive could not be compressed: {e}"))?;
         file.flush().map_err(|e| e.to_string())?;
     }
     std::fs::rename(&tmp, &path).map_err(|e| format!("the archive could not be kept: {e}"))?;
@@ -242,19 +313,26 @@ pub fn take_backup(store_path: &Path, backup_dir: &Path, by: Value) -> Result<Ba
         let keys_path = backup_dir.join(&keys_name);
         let tmp = backup_dir.join(format!("{keys_name}.tmp"));
         {
-            let file = File::create(&tmp).map_err(|e| format!("the person-keys archive could not be created: {e}"))?;
+            let file = File::create(&tmp)
+                .map_err(|e| format!("the person-keys archive could not be created: {e}"))?;
             let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
             let mut tar = tar::Builder::new(encoder);
             for file in &person_keys {
-                let Ok(relative) = file.strip_prefix(store_path) else { continue };
-                let Ok(mut handle) = File::open(file) else { continue };
-                tar.append_file(Path::new(STORE_PREFIX).join(relative), &mut handle).map_err(|e| format!("{}: {e}", relative.display()))?;
+                let Ok(relative) = file.strip_prefix(store_path) else {
+                    continue;
+                };
+                let Ok(mut handle) = File::open(file) else {
+                    continue;
+                };
+                tar.append_file(Path::new(STORE_PREFIX).join(relative), &mut handle)
+                    .map_err(|e| format!("{}: {e}", relative.display()))?;
             }
             let encoder = tar.into_inner().map_err(|e| e.to_string())?;
             let mut file = encoder.finish().map_err(|e| e.to_string())?;
             file.flush().map_err(|e| e.to_string())?;
         }
-        std::fs::rename(&tmp, &keys_path).map_err(|e| format!("the person-keys archive could not be kept: {e}"))?;
+        std::fs::rename(&tmp, &keys_path)
+            .map_err(|e| format!("the person-keys archive could not be kept: {e}"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -262,13 +340,22 @@ pub fn take_backup(store_path: &Path, backup_dir: &Path, by: Value) -> Result<Ba
         }
         keys_archive = Some(keys_name);
     }
-    Ok(Backup { name, path: path.display().to_string(), bytes, manifest: Some(manifest), person_keys: keys_archive })
+    Ok(Backup {
+        name,
+        path: path.display().to_string(),
+        bytes,
+        manifest: Some(manifest),
+        person_keys: keys_archive,
+    })
 }
 
 /// The person-keys archive that goes with a data archive:
 /// `estate-….tar.gz` → `estate-…-person-keys.tar.gz`.
 pub fn person_keys_name(archive_name: &str) -> String {
-    format!("{}-person-keys.tar.gz", archive_name.trim_end_matches(".tar.gz"))
+    format!(
+        "{}-person-keys.tar.gz",
+        archive_name.trim_end_matches(".tar.gz")
+    )
 }
 
 fn read_manifest(path: &Path) -> Option<Manifest> {
@@ -288,17 +375,30 @@ fn read_manifest(path: &Path) -> Option<Manifest> {
 /// Every `estate-*.tar.gz` in the backup directory, newest first.
 pub fn list_backups(backup_dir: &Path) -> Vec<Backup> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(backup_dir) else { return out };
+    let Ok(entries) = std::fs::read_dir(backup_dir) else {
+        return out;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else { continue };
-        if !name.starts_with("estate-") || !name.ends_with(".tar.gz") || name.ends_with("-person-keys.tar.gz") {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        if !name.starts_with("estate-")
+            || !name.ends_with(".tar.gz")
+            || name.ends_with("-person-keys.tar.gz")
+        {
             continue;
         }
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let keys = person_keys_name(&name);
         let person_keys = backup_dir.join(&keys).exists().then_some(keys);
-        out.push(Backup { manifest: read_manifest(&path), name, path: path.display().to_string(), bytes, person_keys });
+        out.push(Backup {
+            manifest: read_manifest(&path),
+            name,
+            path: path.display().to_string(),
+            bytes,
+            person_keys,
+        });
     }
     out.sort_by(|a, b| b.name.cmp(&a.name));
     out
@@ -320,7 +420,10 @@ fn unpack(archive: &Path, store_path: &Path) -> Result<(Option<Manifest>, u64), 
     let mut manifest = None;
     let mut files = 0;
     std::fs::create_dir_all(store_path).map_err(|e| format!("the store could not be made: {e}"))?;
-    for entry in tar.entries().map_err(|e| format!("the archive does not read: {e}"))? {
+    for entry in tar
+        .entries()
+        .map_err(|e| format!("the archive does not read: {e}"))?
+    {
         let mut entry = entry.map_err(|e| format!("a member does not read: {e}"))?;
         let path = entry.path().map_err(|e| e.to_string())?.into_owned();
         if path.to_str() == Some(MANIFEST) {
@@ -329,15 +432,25 @@ fn unpack(archive: &Path, store_path: &Path) -> Result<(Option<Manifest>, u64), 
             manifest = serde_json::from_slice(&bytes).ok();
             continue;
         }
-        let Ok(relative) = path.strip_prefix(STORE_PREFIX) else { continue };
-        if relative.components().any(|c| !matches!(c, Component::Normal(_))) {
-            return Err(format!("the archive names a path outside the store: {}", path.display()));
+        let Ok(relative) = path.strip_prefix(STORE_PREFIX) else {
+            continue;
+        };
+        if relative
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return Err(format!(
+                "the archive names a path outside the store: {}",
+                path.display()
+            ));
         }
         let dest = store_path.join(relative);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        entry.unpack(&dest).map_err(|e| format!("{}: {e}", relative.display()))?;
+        entry
+            .unpack(&dest)
+            .map_err(|e| format!("{}: {e}", relative.display()))?;
         files += 1;
     }
     Ok((manifest, files))
@@ -351,7 +464,10 @@ pub fn restore_if_asked(store_path: &Path, archive: Option<&Path>) -> Option<Res
     if !store_is_empty(store_path) {
         let reason = format!("the store at {} is not empty; a restore only fills an empty store — move the current one aside first", store_path.display());
         tracing::error!(archive = %name, %reason, "restore skipped");
-        return Some(RestoreOutcome::Skipped { archive: name, reason });
+        return Some(RestoreOutcome::Skipped {
+            archive: name,
+            reason,
+        });
     }
     match unpack(archive, store_path) {
         Ok((manifest, mut files)) => {
@@ -364,9 +480,13 @@ pub fn restore_if_asked(store_path: &Path, archive: Option<&Path>) -> Option<Res
                     match unpack(&keys_path, store_path) {
                         Ok((_, n)) => {
                             files += n;
-                            person_keys = Some(json!({"archive": keys_path.display().to_string(), "keys": n}));
+                            person_keys = Some(
+                                json!({"archive": keys_path.display().to_string(), "keys": n}),
+                            );
                         }
-                        Err(reason) => tracing::error!(archive = %keys_path.display(), %reason, "person keys not restored"),
+                        Err(reason) => {
+                            tracing::error!(archive = %keys_path.display(), %reason, "person keys not restored")
+                        }
                     }
                 }
             }
@@ -375,11 +495,18 @@ pub fn restore_if_asked(store_path: &Path, archive: Option<&Path>) -> Option<Res
                 let _ = std::fs::write(store_path.join(RESTORED_MARKER), bytes);
             }
             tracing::info!(archive = %name, files, "estate restored from a backup");
-            Some(RestoreOutcome::Restored { archive: name, manifest, files })
+            Some(RestoreOutcome::Restored {
+                archive: name,
+                manifest,
+                files,
+            })
         }
         Err(reason) => {
             tracing::error!(archive = %name, %reason, "restore failed");
-            Some(RestoreOutcome::Failed { archive: name, reason })
+            Some(RestoreOutcome::Failed {
+                archive: name,
+                reason,
+            })
         }
     }
 }
@@ -391,20 +518,33 @@ pub fn restored(store_path: &Path) -> Option<Value> {
 }
 
 fn restored_from(store_path: &Path) -> Option<Value> {
-    std::fs::read(store_path.join(RESTORED_MARKER)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    std::fs::read(store_path.join(RESTORED_MARKER))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
 }
 
 /// `GET /estate` — what this deployment holds, where its backups go, the
 /// backups there, and whether this store came from one.
-pub(crate) async fn get_estate(AxumState(state): AxumState<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
+pub(crate) async fn get_estate(
+    AxumState(state): AxumState<Arc<AppState>>,
+) -> Result<Json<Value>, ApiError> {
     let forgotten = state.vault.forgotten();
     let store_path = state.estate.store_path.clone();
     let backup_dir = state.estate.backup_dir.clone();
     let (counts, backups, restored, bytes) = tokio::task::spawn_blocking(move || {
         let mut files = Vec::new();
         walk(&store_path, &mut files);
-        let bytes: u64 = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
-        (counts(&store_path), list_backups(&backup_dir), restored_from(&store_path), bytes)
+        let bytes: u64 = files
+            .iter()
+            .filter_map(|f| std::fs::metadata(f).ok())
+            .map(|m| m.len())
+            .sum();
+        (
+            counts(&store_path),
+            list_backups(&backup_dir),
+            restored_from(&store_path),
+            bytes,
+        )
     })
     .await
     .map_err(|e| ApiError::internal(format!("estate: {e}")))?;
@@ -435,7 +575,6 @@ pub(crate) async fn post_backup(
     tracing::info!(archive = %backup.path, bytes = backup.bytes, "estate backed up");
     Ok((StatusCode::CREATED, Json(backup)))
 }
-
 
 /// `GET /estate/roster?days=7` — the estate over days: what each day
 /// wrote to the journals (files, bytes) and to memory (notes), how many
@@ -498,8 +637,17 @@ pub(crate) async fn get_roster(
     // Runs: finished by day, and each schedule's firings for the drift.
     let recalled = crate::routes::recall_runs_for(&state, &tenant, 500, None).await?;
     let mut firings: BTreeMap<String, Vec<DateTime<Utc>>> = BTreeMap::new();
-    for run in recalled.into_iter().map(crate::routes::RecalledRun::into_wire) {
-        let Some(at) = run.get("created_at").and_then(Value::as_str).and_then(|t| t.parse::<DateTime<Utc>>().ok()) else { continue };
+    for run in recalled
+        .into_iter()
+        .map(crate::routes::RecalledRun::into_wire)
+    {
+        let Some(at) = run
+            .get("created_at")
+            .and_then(Value::as_str)
+            .and_then(|t| t.parse::<DateTime<Utc>>().ok())
+        else {
+            continue;
+        };
         if at < since {
             continue;
         }
@@ -510,11 +658,22 @@ pub(crate) async fn get_roster(
             firings.entry(cron_id.to_owned()).or_default().push(at);
         }
     }
-    let crons = state.server_store.list_crons().await.map_err(ApiError::internal)?;
+    let crons = state
+        .server_store
+        .list_crons()
+        .await
+        .map_err(ApiError::internal)?;
     let mut schedules: Vec<Value> = Vec::new();
     for cron in crons.iter().filter(|c| c.assistant_id.is_some()) {
-        let external = tenant.unscope(&cron.cron_id).unwrap_or(&cron.cron_id).to_owned();
-        let mut fired: Vec<DateTime<Utc>> = firings.get(&external).cloned().or_else(|| firings.get(&cron.cron_id).cloned()).unwrap_or_default();
+        let external = tenant
+            .unscope(&cron.cron_id)
+            .unwrap_or(&cron.cron_id)
+            .to_owned();
+        let mut fired: Vec<DateTime<Utc>> = firings
+            .get(&external)
+            .cloned()
+            .or_else(|| firings.get(&cron.cron_id).cloned())
+            .unwrap_or_default();
         fired.sort();
         let interval = cron.interval_secs;
         // Lateness: each gap between firings, past the interval; a cron
@@ -527,7 +686,10 @@ pub(crate) async fn get_roster(
             }
         }
         late.sort();
-        let agent = cron.assistant_id.as_deref().map(|id| tenant.unscope(id).unwrap_or(id).to_owned());
+        let agent = cron
+            .assistant_id
+            .as_deref()
+            .map(|id| tenant.unscope(id).unwrap_or(id).to_owned());
         schedules.push(json!({
             "cron_id": external,
             "assistant_id": agent,

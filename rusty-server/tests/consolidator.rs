@@ -27,23 +27,44 @@ struct Everyone;
 #[async_trait::async_trait]
 impl ChatModel for Everyone {
     async fn chat(&self, messages: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        let system = messages.iter().filter(|m| m.role == Role::System).filter_map(|m| m.content.clone()).collect::<Vec<_>>().join("\n");
+        let system = messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .filter_map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         let answered = messages.iter().filter(|m| m.role == Role::Tool).count();
         let message = if system.contains("You are the Consolidator") {
             match answered {
-                0 => ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "skills.read", json!({"name": "count-well"}))]),
-                1 => ChatMessage::assistant_tool_calls(vec![ToolCall::new("c2", "runs.review", json!({"agent": "desk"}))]),
+                0 => ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                    "c1",
+                    "skills.read",
+                    json!({"name": "count-well"}),
+                )]),
+                1 => ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                    "c2",
+                    "runs.review",
+                    json!({"agent": "desk"}),
+                )]),
                 2 => ChatMessage::assistant_tool_calls(vec![ToolCall::new(
                     "c3",
                     "skills.revise",
                     json!({"skill": "count-well", "add_step": "Call lookup with no arguments and answer with its count; never answer from memory.", "why": "Every verified run called lookup before answering; the procedure never says to."}),
                 )]),
                 _ => {
-                    let filed = messages.iter().rev().find(|m| m.role == Role::Tool).and_then(|m| m.content.as_deref()).and_then(|c| serde_json::from_str::<Value>(c).ok()).unwrap_or(Value::Null);
+                    let filed = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == Role::Tool)
+                        .and_then(|m| m.content.as_deref())
+                        .and_then(|c| serde_json::from_str::<Value>(c).ok())
+                        .unwrap_or(Value::Null);
                     ChatMessage::assistant(format!("The verified runs all looked up first. Filed \"Call lookup with no arguments…\" as revision {} (held: {}).", filed["revision"], filed["held"]))
                 }
             }
-        } else if system.contains("LOOKUP FIRST") || system.contains("Call lookup with no arguments") {
+        } else if system.contains("LOOKUP FIRST")
+            || system.contains("Call lookup with no arguments")
+        {
             if answered == 0 {
                 ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "lookup", json!({}))])
             } else {
@@ -56,7 +77,11 @@ impl ChatModel for Everyone {
         } else {
             ChatMessage::assistant("there are 168")
         };
-        Ok(ChatResponse { message, model: Some("everyone".into()), usage: None })
+        Ok(ChatResponse {
+            message,
+            model: Some("everyone".into()),
+            usage: None,
+        })
     }
 }
 
@@ -90,7 +115,9 @@ fn app() -> (Router, std::path::PathBuf) {
     let graph = create_react_agent(Arc::new(Everyone), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())
         .with_platform_tools(platform_tools)
         .with_context_policy(rusty_agent_runtime::context::ContextPolicy::standard(8192));
@@ -106,16 +133,27 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 async fn platform_agent(app: &Router, name: &str) -> Value {
     for _ in 0..200 {
         let (_, list) = call(app, "GET", "/assistants", None).await;
-        let agents = list.as_array().cloned().or_else(|| list["assistants"].as_array().cloned()).unwrap_or_default();
+        let agents = list
+            .as_array()
+            .cloned()
+            .or_else(|| list["assistants"].as_array().cloned())
+            .unwrap_or_default();
         if let Some(found) = agents.iter().find(|a| a["name"] == name) {
             return found.clone();
         }
@@ -125,7 +163,13 @@ async fn platform_agent(app: &Router, name: &str) -> Value {
 }
 
 async fn run_as(app: &Router, assistant_id: &str, words: &str) -> (String, String, Value) {
-    let (_, thread) = call(app, "POST", "/threads", Some(json!({"graph": "react_agent"}))).await;
+    let (_, thread) = call(
+        app,
+        "POST",
+        "/threads",
+        Some(json!({"graph": "react_agent"})),
+    )
+    .await;
     let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
     let (status, run) = call(app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(json!({"input": {"messages": [{"role": "user", "content": words}]}, "assistant_id": assistant_id}))).await;
     assert_eq!(status, StatusCode::OK, "{run}");
@@ -134,9 +178,22 @@ async fn run_as(app: &Router, assistant_id: &str, words: &str) -> (String, Strin
 
 async fn finished(app: &Router, name: &str, version: &str, evaluation_id: &str) -> Value {
     for _ in 0..400 {
-        let (_, list) = call(app, "GET", &format!("/datasets/{name}/versions/{version}/evaluations"), None).await;
-        let evaluations = list["evaluations"].as_array().cloned().or_else(|| list.as_array().cloned()).unwrap_or_default();
-        if let Some(e) = evaluations.iter().find(|e| e["evaluation_id"] == evaluation_id) {
+        let (_, list) = call(
+            app,
+            "GET",
+            &format!("/datasets/{name}/versions/{version}/evaluations"),
+            None,
+        )
+        .await;
+        let evaluations = list["evaluations"]
+            .as_array()
+            .cloned()
+            .or_else(|| list.as_array().cloned())
+            .unwrap_or_default();
+        if let Some(e) = evaluations
+            .iter()
+            .find(|e| e["evaluation_id"] == evaluation_id)
+        {
             if e["status"] == "done" {
                 return e.clone();
             }
@@ -147,12 +204,21 @@ async fn finished(app: &Router, name: &str, version: &str, evaluation_id: &str) 
 }
 
 #[tokio::test]
-async fn the_consolidator_files_what_the_verified_runs_did_and_the_gate_holds_it_until_the_followers_pass() {
+async fn the_consolidator_files_what_the_verified_runs_did_and_the_gate_holds_it_until_the_followers_pass(
+) {
     let (app, store) = app();
     let consolidator = platform_agent(&app, "Consolidator").await;
     let consolidator_id = consolidator["assistant_id"].as_str().unwrap().to_owned();
-    let tools: Vec<String> = consolidator["config"]["studio_intent"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect();
-    assert!(tools.iter().any(|t| t == "skills.revise") && tools.iter().any(|t| t == "runs.review"), "{tools:?}");
+    let tools: Vec<String> = consolidator["config"]["studio_intent"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        tools.iter().any(|t| t == "skills.revise") && tools.iter().any(|t| t == "runs.review"),
+        "{tools:?}"
+    );
 
     // A skill whose procedure says nothing about looking up, and a desk
     // that follows it — and looks up anyway, verified.
@@ -176,7 +242,10 @@ async fn the_consolidator_files_what_the_verified_runs_did_and_the_gate_holds_it
     // The Consolidator, asked the way the Skills page asks it.
     let (_, _, said) = run_as(&app, &consolidator_id, "Consolidate the skill count-well: read its procedure and its followers' recent runs, name the trajectory the verified runs share that the procedure does not state, and file one revision with skills.revise if there is one.").await;
     let reply = said.to_string();
-    assert!(reply.contains("revision 2"), "the Consolidator filed revision 2 and said so: {reply}");
+    assert!(
+        reply.contains("revision 2"),
+        "the Consolidator filed revision 2 and said so: {reply}"
+    );
     assert!(reply.contains("held: true"), "held at the gate: {reply}");
 
     // The revision is the Consolidator's, held; the follower's suite is
@@ -185,23 +254,47 @@ async fn the_consolidator_files_what_the_verified_runs_did_and_the_gate_holds_it
     assert_eq!(receipt["current"], json!(1), "{receipt}");
     assert_eq!(receipt["candidate"], json!(2), "{receipt}");
     let (_, revision) = call(&app, "GET", "/skills/count-well/versions/2", None).await;
-    assert_eq!(revision["provenance"]["author"], "Consolidator", "{revision}");
+    assert_eq!(
+        revision["provenance"]["author"], "Consolidator",
+        "{revision}"
+    );
     let (_, evidence) = call(&app, "GET", "/skills/count-well/evidence?revision=2", None).await;
-    let suites = evidence["evidence"]["suites"].as_array().cloned().unwrap_or_default();
+    let suites = evidence["evidence"]["suites"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(suites.len(), 1, "{evidence}");
-    let judged = suites[0]["evaluation_id"].as_str().expect("the gate started the follower's suite").to_owned();
+    let judged = suites[0]["evaluation_id"]
+        .as_str()
+        .expect("the gate started the follower's suite")
+        .to_owned();
     let done = finished(&app, "desk-counts", "1", &judged).await;
-    assert_eq!(done["passed"], 1, "the follower passes under the revision: {done}");
+    assert_eq!(
+        done["passed"], 1,
+        "the follower passes under the revision: {done}"
+    );
 
     // A person promotes it; the followers run revision 2 from here.
-    let (status, promoted) = call(&app, "POST", "/skills/count-well/promote", Some(json!({"revision": 2}))).await;
+    let (status, promoted) = call(
+        &app,
+        "POST",
+        "/skills/count-well/promote",
+        Some(json!({"revision": 2})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{promoted}");
     let (_, receipt) = call(&app, "GET", "/skills/count-well", None).await;
     assert_eq!(receipt["current"], json!(2), "{receipt}");
     let (_, body) = call(&app, "GET", "/skills/count-well/body", None).await;
     let text = body["body"].as_str().unwrap_or_default().to_owned();
-    assert!(text.contains("**First:** Call lookup with no arguments"), "the step went first: {text}");
-    assert!(text.contains("Answer with the count"), "the rest stands: {text}");
+    assert!(
+        text.contains("**First:** Call lookup with no arguments"),
+        "the step went first: {text}"
+    );
+    assert!(
+        text.contains("Answer with the count"),
+        "the rest stands: {text}"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }

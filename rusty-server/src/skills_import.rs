@@ -176,10 +176,7 @@ pub(crate) fn archive_for(
             subpath,
         });
     }
-    Err(
-        "only a GitHub repository URL or a direct .tar.gz / .tgz URL can be imported"
-            .to_owned(),
-    )
+    Err("only a GitHub repository URL or a direct .tar.gz / .tgz URL can be imported".to_owned())
 }
 
 /// One skill found in an archive: the directory around a `SKILL.md`.
@@ -298,8 +295,13 @@ pub(crate) fn unpack_files(archive: &[u8]) -> Result<Files, String> {
 
 /// Read a gzipped tar archive and find every skill in it.
 pub(crate) fn unpack_skills(archive: &[u8], subpath: Option<&str>) -> Result<Unpacked, String> {
-    let Files { files, oversized, .. } = unpack_files(archive)?;
-    let mut unpacked = Unpacked { skills: Vec::new(), oversized };
+    let Files {
+        files, oversized, ..
+    } = unpack_files(archive)?;
+    let mut unpacked = Unpacked {
+        skills: Vec::new(),
+        oversized,
+    };
 
     // A skill is wherever a SKILL.md is; the directory around it is the
     // package.
@@ -416,12 +418,10 @@ pub(crate) async fn import_skills(
     let body = fetch_archive(&state, &archive, "skills-import").await?;
 
     let subpath = archive.subpath.clone();
-    let unpacked = tokio::task::spawn_blocking(move || {
-        unpack_skills(&body, subpath.as_deref())
-    })
-    .await
-    .map_err(|e| ApiError::internal(format!("unpack: {e}")))?
-    .map_err(ApiError::bad_request)?;
+    let unpacked = tokio::task::spawn_blocking(move || unpack_skills(&body, subpath.as_deref()))
+        .await
+        .map_err(|e| ApiError::internal(format!("unpack: {e}")))?
+        .map_err(ApiError::bad_request)?;
 
     let found = unpacked.skills.len();
     let mut imported = Vec::new();
@@ -455,9 +455,7 @@ pub(crate) async fn import_skills(
                 "reason": format!("the security scan denied it: {} finding(s)", denials.len()),
                 "findings": denials,
             })),
-            Err(error) => {
-                skipped.push(json!({ "path": skill.path, "reason": error.to_string() }))
-            }
+            Err(error) => skipped.push(json!({ "path": skill.path, "reason": error.to_string() })),
         }
     }
 
@@ -492,38 +490,63 @@ mod tests {
             builder.append_link(&mut header, path, target).unwrap();
         }
         let tar_bytes = builder.into_inner().unwrap();
-        let mut encoder =
-            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(&tar_bytes).unwrap();
         encoder.finish().unwrap()
     }
 
-    const SKILL_A: &[u8] = b"---\nname: alpha\ndescription: The first skill.\n---\n\n# Alpha\n\nDo the thing.\n";
+    const SKILL_A: &[u8] =
+        b"---\nname: alpha\ndescription: The first skill.\n---\n\n# Alpha\n\nDo the thing.\n";
     const SKILL_B: &[u8] = b"---\nname: beta\ndescription: The second skill.\n---\n\n# Beta\n";
 
     #[test]
     fn a_github_repository_url_is_its_codeload_tarball() {
         let archive = archive_for("https://github.com/acme/skills", None, None).unwrap();
-        assert_eq!(archive.url, "https://codeload.github.com/acme/skills/tar.gz/HEAD");
+        assert_eq!(
+            archive.url,
+            "https://codeload.github.com/acme/skills/tar.gz/HEAD"
+        );
         assert_eq!(archive.display, "https://github.com/acme/skills@HEAD");
         assert_eq!(archive.subpath, None);
 
-        let archive = archive_for("https://github.com/acme/skills.git/", Some("v2"), Some("/packs/")).unwrap();
-        assert_eq!(archive.url, "https://codeload.github.com/acme/skills/tar.gz/v2");
+        let archive = archive_for(
+            "https://github.com/acme/skills.git/",
+            Some("v2"),
+            Some("/packs/"),
+        )
+        .unwrap();
+        assert_eq!(
+            archive.url,
+            "https://codeload.github.com/acme/skills/tar.gz/v2"
+        );
         assert_eq!(archive.display, "https://github.com/acme/skills@v2/packs");
         assert_eq!(archive.subpath.as_deref(), Some("packs"));
     }
 
     #[test]
     fn a_browser_tree_url_carries_its_ref_and_path() {
-        let archive =
-            archive_for("https://github.com/acme/skills/tree/main/skills/docx", None, None).unwrap();
-        assert_eq!(archive.url, "https://codeload.github.com/acme/skills/tar.gz/main");
+        let archive = archive_for(
+            "https://github.com/acme/skills/tree/main/skills/docx",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            archive.url,
+            "https://codeload.github.com/acme/skills/tar.gz/main"
+        );
         assert_eq!(archive.subpath.as_deref(), Some("skills/docx"));
         // An explicit ref wins over the one in the URL.
-        let archive =
-            archive_for("https://github.com/acme/skills/tree/main", Some("release"), None).unwrap();
-        assert_eq!(archive.url, "https://codeload.github.com/acme/skills/tar.gz/release");
+        let archive = archive_for(
+            "https://github.com/acme/skills/tree/main",
+            Some("release"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            archive.url,
+            "https://codeload.github.com/acme/skills/tar.gz/release"
+        );
     }
 
     #[test]
@@ -534,9 +557,11 @@ mod tests {
         assert!(archive_for("https://github.com/acme", None, None)
             .unwrap_err()
             .contains("owner and a repository"));
-        assert!(archive_for("https://github.com/acme/skills", Some("../x"), None)
-            .unwrap_err()
-            .contains("not a git ref"));
+        assert!(
+            archive_for("https://github.com/acme/skills", Some("../x"), None)
+                .unwrap_err()
+                .contains("not a git ref")
+        );
         assert!(archive_for("https://example.com/skills", None, None)
             .unwrap_err()
             .contains("GitHub repository URL or a direct"));
@@ -566,7 +591,10 @@ mod tests {
             alpha.files.keys().cloned().collect::<Vec<_>>(),
             vec!["SKILL.md".to_owned(), "references/guide.md".to_owned()]
         );
-        assert_eq!(alpha.not_imported, vec!["LICENSE".to_owned(), "scripts/run.py".to_owned()]);
+        assert_eq!(
+            alpha.not_imported,
+            vec!["LICENSE".to_owned(), "scripts/run.py".to_owned()]
+        );
         assert_eq!(unpacked.skills[1].path, "repo-abc123/skills/beta");
         // The members become a package the registry accepts.
         let package = SkillPackage::from_files(alpha.files.clone()).unwrap();
@@ -585,10 +613,15 @@ mod tests {
         let skills = unpack_skills(&archive, Some("skills")).unwrap().skills;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].path, "repo-abc123/skills/alpha");
-        let skills = unpack_skills(&archive, Some("repo-abc123/drafts")).unwrap().skills;
+        let skills = unpack_skills(&archive, Some("repo-abc123/drafts"))
+            .unwrap()
+            .skills;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].path, "repo-abc123/drafts/beta");
-        assert!(unpack_skills(&archive, Some("nowhere")).unwrap().skills.is_empty());
+        assert!(unpack_skills(&archive, Some("nowhere"))
+            .unwrap()
+            .skills
+            .is_empty());
     }
 
     #[test]

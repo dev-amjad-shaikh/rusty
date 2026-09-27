@@ -408,11 +408,16 @@ async fn a_correction_carrying_a_credential_is_refused() {
         &app,
         "POST",
         "/memory/corrections",
-        Some(correction_payload(json!({"corrected": {"answer": "call the API with sk_live_abcdef1234567890"}}))),
+        Some(correction_payload(
+            json!({"corrected": {"answer": "call the API with sk_live_abcdef1234567890"}}),
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
-    assert!(v.to_string().contains("an API key") && !v.to_string().contains("sk_live_"), "{v}");
+    assert!(
+        v.to_string().contains("an API key") && !v.to_string().contains("sk_live_"),
+        "{v}"
+    );
     let _ = std::fs::remove_dir_all(store);
 }
 

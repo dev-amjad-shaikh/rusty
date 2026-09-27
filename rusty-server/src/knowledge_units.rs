@@ -57,17 +57,35 @@ fn key(tenant: &str, agent: &str) -> String {
 }
 
 pub(crate) async fn load(state: &AppState, tenant: &str, agent: &str) -> Option<KnowledgeUnit> {
-    state.server_store.kv_get(NAMESPACE, &key(tenant, agent)).await.ok().flatten().and_then(|i| serde_json::from_value(i.value).ok())
+    state
+        .server_store
+        .kv_get(NAMESPACE, &key(tenant, agent))
+        .await
+        .ok()
+        .flatten()
+        .and_then(|i| serde_json::from_value(i.value).ok())
 }
 
 /// A source's whole text, chunk by chunk, in order.
-async fn body_of(state: &AppState, tenant: &TenantContext, content_hash: &str) -> Result<String, ApiError> {
+async fn body_of(
+    state: &AppState,
+    tenant: &TenantContext,
+    content_hash: &str,
+) -> Result<String, ApiError> {
     let base = crate::knowledge::knowledge_base(state, tenant);
-    let mut chunks = state.knowledge.chunks_of(tenant.tenant(), content_hash).await.map_err(ApiError::internal)?;
+    let mut chunks = state
+        .knowledge
+        .chunks_of(tenant.tenant(), content_hash)
+        .await
+        .map_err(ApiError::internal)?;
     chunks.sort_by_key(|c| c.chunk_index);
     let mut out = String::new();
     for chunk in chunks {
-        if let Some(text) = base.chunk_content(&chunk.content_address).await.map_err(|e| ApiError::internal(e.to_string()))? {
+        if let Some(text) = base
+            .chunk_content(&chunk.content_address)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+        {
             out.push_str(&text);
         }
     }
@@ -84,15 +102,33 @@ pub(crate) struct CompilePayload {
 /// `POST /assistants/{id}/knowledge/unit {source_ids, char_limit?}` —
 /// compile. Refused (409) while a chosen source is contested, naming the
 /// conflicts; refused (400) for a source the agent may not read.
-pub(crate) async fn compile(AxumState(state): AxumState<Arc<AppState>>, Extension(tenant): Extension<TenantContext>, Path(agent): Path<String>, Json(payload): Json<CompilePayload>) -> Result<Json<Value>, ApiError> {
-    state.server_store.get_assistant(&tenant.scope(&agent)).await.map_err(ApiError::internal)?.ok_or_else(|| ApiError::not_found(format!("agent `{agent}` not found")))?;
-    let mut ids: Vec<String> = payload.source_ids.iter().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
+pub(crate) async fn compile(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent): Path<String>,
+    Json(payload): Json<CompilePayload>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .server_store
+        .get_assistant(&tenant.scope(&agent))
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("agent `{agent}` not found")))?;
+    let mut ids: Vec<String> = payload
+        .source_ids
+        .iter()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect();
     ids.sort();
     ids.dedup();
     if ids.is_empty() {
         return Err(ApiError::bad_request("pick at least one source".to_owned()));
     }
-    let limit = payload.char_limit.unwrap_or(UNIT_CHARS_DEFAULT).clamp(1_000, UNIT_CHARS_MAX);
+    let limit = payload
+        .char_limit
+        .unwrap_or(UNIT_CHARS_DEFAULT)
+        .clamp(1_000, UNIT_CHARS_MAX);
     // Publish is blocked while a chosen source is contested.
     let conflicts = crate::knowledge_conflicts::all_in(&state.server_store, tenant.tenant()).await;
     let contested: Vec<Value> = conflicts
@@ -110,16 +146,31 @@ pub(crate) async fn compile(AxumState(state): AxumState<Arc<AppState>>, Extensio
     let base = crate::knowledge::knowledge_base(&state, &tenant);
     let mut chosen = Vec::new();
     for id in &ids {
-        let versions = base.versions_of(id).await.map_err(|e| ApiError::internal(e.to_string()))?;
-        let latest = versions.last().cloned().ok_or_else(|| ApiError::not_found(format!("no knowledge source `{id}`")))?;
-        let readable = latest.scope.scope == MemoryScope::Tenant || (latest.scope.scope == MemoryScope::Agent && latest.scope.id == agent);
+        let versions = base
+            .versions_of(id)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let latest = versions
+            .last()
+            .cloned()
+            .ok_or_else(|| ApiError::not_found(format!("no knowledge source `{id}`")))?;
+        let readable = latest.scope.scope == MemoryScope::Tenant
+            || (latest.scope.scope == MemoryScope::Agent && latest.scope.id == agent);
         if !readable {
-            return Err(ApiError::bad_request(format!("`{}` is another agent's source — this agent may not read it", latest.title)));
+            return Err(ApiError::bad_request(format!(
+                "`{}` is another agent's source — this agent may not read it",
+                latest.title
+            )));
         }
         chosen.push(latest);
     }
     // The organization's own first, then a vendor's, then generic; then by title.
-    chosen.sort_by(|a, b| a.provenance.rank().cmp(&b.provenance.rank()).then_with(|| a.title.cmp(&b.title)));
+    chosen.sort_by(|a, b| {
+        a.provenance
+            .rank()
+            .cmp(&b.provenance.rank())
+            .then_with(|| a.title.cmp(&b.title))
+    });
     let mut text = format!(
         "Compiled {} from {} source{}, ranked by provenance: the organization's own first, then vendor documentation, then generic guidance. Where they disagree, the one listed first stands. Cite a section by its source_id; read the rest of a cut source with knowledge.read.",
         Utc::now().format("%Y-%m-%d"), chosen.len(), if chosen.len() == 1 { "" } else { "s" }
@@ -131,18 +182,44 @@ pub(crate) async fn compile(AxumState(state): AxumState<Arc<AppState>>, Extensio
         let body = body.trim();
         let cut = body.chars().count() > per_source;
         let kept: String = body.chars().take(per_source).collect();
-        text.push_str(&format!("\n\n### {} — {} · `{}` v{}\n", source.title, source.provenance.label(), source.source_id, source.version));
-        for c in conflicts.iter().filter(|c| c.state == "ruled" && (c.source_a == source.source_id || c.source_b == source.source_id)) {
+        text.push_str(&format!(
+            "\n\n### {} — {} · `{}` v{}\n",
+            source.title,
+            source.provenance.label(),
+            source.source_id,
+            source.version
+        ));
+        for c in conflicts.iter().filter(|c| {
+            c.state == "ruled" && (c.source_a == source.source_id || c.source_b == source.source_id)
+        }) {
             if c.stands.as_deref().is_some_and(|s| s != source.source_id) {
-                let winner = if c.source_a == source.source_id { &c.title_b } else { &c.title_a };
-                text.push_str(&format!("Overruled on \"{}\": {} stands — do not follow this source on that.\n", c.claim, winner));
+                let winner = if c.source_a == source.source_id {
+                    &c.title_b
+                } else {
+                    &c.title_a
+                };
+                text.push_str(&format!(
+                    "Overruled on \"{}\": {} stands — do not follow this source on that.\n",
+                    c.claim, winner
+                ));
             }
         }
         text.push_str(&kept);
         if cut {
-            text.push_str(&format!("\n… (cut — read the rest with knowledge.read `{}`)", source.source_id));
+            text.push_str(&format!(
+                "\n… (cut — read the rest with knowledge.read `{}`)",
+                source.source_id
+            ));
         }
-        listed.push(UnitSource { source_id: source.source_id.clone(), title: source.title.clone(), provenance: source.provenance, version: source.version, content_hash: source.content_hash.clone(), chars: kept.chars().count(), cut });
+        listed.push(UnitSource {
+            source_id: source.source_id.clone(),
+            title: source.title.clone(),
+            provenance: source.provenance,
+            version: source.version,
+            content_hash: source.content_hash.clone(),
+            chars: kept.chars().count(),
+            cut,
+        });
     }
     let previous = load(&state, tenant.tenant(), &agent).await;
     let unit = KnowledgeUnit {
@@ -155,8 +232,18 @@ pub(crate) async fn compile(AxumState(state): AxumState<Arc<AppState>>, Extensio
         sources: listed,
         text,
     };
-    state.server_store.kv_put(NAMESPACE, &key(tenant.tenant(), &agent), serde_json::to_value(&unit).map_err(|e| ApiError::internal(e.to_string()))?).await.map_err(ApiError::internal)?;
-    Ok(Json(json!({"unit": unit, "chars": unit.text.chars().count()})))
+    state
+        .server_store
+        .kv_put(
+            NAMESPACE,
+            &key(tenant.tenant(), &agent),
+            serde_json::to_value(&unit).map_err(|e| ApiError::internal(e.to_string()))?,
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(
+        json!({"unit": unit, "chars": unit.text.chars().count()}),
+    ))
 }
 
 /// What has changed since compiling: sources with a newer version, or gone.
@@ -175,7 +262,11 @@ async fn staleness(state: &AppState, tenant: &TenantContext, unit: &KnowledgeUni
 
 /// `GET /assistants/{id}/knowledge/unit` — the unit, what went stale, and
 /// the conflicts filed on its sources since.
-pub(crate) async fn get_unit(AxumState(state): AxumState<Arc<AppState>>, Extension(tenant): Extension<TenantContext>, Path(agent): Path<String>) -> Result<Json<Value>, ApiError> {
+pub(crate) async fn get_unit(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent): Path<String>,
+) -> Result<Json<Value>, ApiError> {
     let Some(unit) = load(&state, tenant.tenant(), &agent).await else {
         return Ok(Json(json!({"unit": null})));
     };
@@ -187,12 +278,22 @@ pub(crate) async fn get_unit(AxumState(state): AxumState<Arc<AppState>>, Extensi
         .map(|c| json!({"conflict_id": c.conflict_id, "claim": c.claim, "between": [c.title_a, c.title_b]}))
         .collect();
     let chars = unit.text.chars().count();
-    Ok(Json(json!({"unit": unit, "chars": chars, "stale": stale, "contested": contested})))
+    Ok(Json(
+        json!({"unit": unit, "chars": chars, "stale": stale, "contested": contested}),
+    ))
 }
 
 /// `DELETE /assistants/{id}/knowledge/unit` — the agent stops carrying it.
-pub(crate) async fn delete_unit(AxumState(state): AxumState<Arc<AppState>>, Extension(tenant): Extension<TenantContext>, Path(agent): Path<String>) -> Result<Json<Value>, ApiError> {
-    let removed = state.server_store.kv_delete(NAMESPACE, &key(tenant.tenant(), &agent)).await.map_err(ApiError::internal)?;
+pub(crate) async fn delete_unit(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(agent): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let removed = state
+        .server_store
+        .kv_delete(NAMESPACE, &key(tenant.tenant(), &agent))
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(json!({"removed": removed})))
 }
 
@@ -204,7 +305,13 @@ pub(crate) async fn unit_text(state: &AppState, tenant: &str, agent: &str) -> Op
     let contested: Vec<String> = crate::knowledge_conflicts::all_in(&state.server_store, tenant)
         .await
         .into_iter()
-        .filter(|c| c.state == "open" && unit.sources.iter().any(|s| s.source_id == c.source_a || s.source_id == c.source_b))
+        .filter(|c| {
+            c.state == "open"
+                && unit
+                    .sources
+                    .iter()
+                    .any(|s| s.source_id == c.source_a || s.source_id == c.source_b)
+        })
         .map(|c| format!("\"{}\" ({} vs {})", c.claim, c.title_a, c.title_b))
         .collect();
     let mut out = format!("## Knowledge unit (v{})\n", unit.version);

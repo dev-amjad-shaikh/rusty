@@ -71,8 +71,14 @@ pub fn lint(manifest: &ConnectorManifest) -> Vec<LintFinding> {
                 if !present {
                     findings.push(LintFinding {
                         operation: Some(op.name.clone()),
-                        problem: format!("{host} requires the `{}` header on every request; {}", required.name, required.why),
-                        fix: format!("add [\"{}\", \"{}\"] to the operation's headers", required.name, required.example),
+                        problem: format!(
+                            "{host} requires the `{}` header on every request; {}",
+                            required.name, required.why
+                        ),
+                        fix: format!(
+                            "add [\"{}\", \"{}\"] to the operation's headers",
+                            required.name, required.example
+                        ),
                     });
                 }
             }
@@ -123,9 +129,16 @@ mod tests {
         let findings = lint(&notion(json!([])));
         assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(findings[0].operation.as_deref(), Some("check-connection"));
-        assert!(findings[0].problem.contains("Notion-Version"), "{}", findings[0]);
+        assert!(
+            findings[0].problem.contains("Notion-Version"),
+            "{}",
+            findings[0]
+        );
         assert!(findings[0].fix.contains("2022-06-28"), "{}", findings[0]);
-        assert!(lint(&notion(json!([["notion-version", "2022-06-28"]]))).is_empty(), "the header name is case-insensitive");
+        assert!(
+            lint(&notion(json!([["notion-version", "2022-06-28"]]))).is_empty(),
+            "the header name is case-insensitive"
+        );
     }
 
     #[test]
@@ -139,7 +152,10 @@ mod tests {
 
     #[test]
     fn an_unknown_host_has_no_vendor_rule() {
-        assert_eq!(host_of("https://Api.Example.com:8443/v1/"), Some("api.example.com".into()));
+        assert_eq!(
+            host_of("https://Api.Example.com:8443/v1/"),
+            Some("api.example.com".into())
+        );
         assert!(required_headers("api.example.com").is_empty());
     }
 }

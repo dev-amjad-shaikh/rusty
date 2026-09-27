@@ -74,7 +74,9 @@ pub(crate) fn spawn(state: Arc<AppState>) {
                 if view.archived_at.is_some() {
                     continue;
                 }
-                let Some(pool) = pool_of(&view.config) else { continue };
+                let Some(pool) = pool_of(&view.config) else {
+                    continue;
+                };
                 if busy.lock().expect("busy set").contains(&view.assistant_id) {
                     continue;
                 }
@@ -90,7 +92,12 @@ pub(crate) fn spawn(state: Arc<AppState>) {
                         tracing::warn!(%error, "active policy unreadable; claiming on the static floor");
                         crate::policy::static_floor_record()
                     });
-                let scope = ClaimScope { pools: &pools, pool_limits: &state.config.task_pool_limits, worker_version: None, timeout_policy: &timeout_record.policy };
+                let scope = ClaimScope {
+                    pools: &pools,
+                    pool_limits: &state.config.task_pool_limits,
+                    worker_version: None,
+                    timeout_policy: &timeout_record.policy,
+                };
                 let claimed = state
                     .server_store
                     .claim_task(&tenant, &worker_id(&external), &scope, LEASE_MS, Utc::now())
@@ -103,7 +110,9 @@ pub(crate) fn spawn(state: Arc<AppState>) {
                         continue;
                     }
                 };
-                busy.lock().expect("busy set").insert(view.assistant_id.clone());
+                busy.lock()
+                    .expect("busy set")
+                    .insert(view.assistant_id.clone());
                 let state = Arc::clone(&state);
                 let busy = Arc::clone(&busy);
                 let internal_id = view.assistant_id.clone();
@@ -132,7 +141,14 @@ fn input_of(payload: &Value) -> Value {
 }
 
 /// One task as one run of the agent, settled either way.
-async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str, pool: &str, task: TaskRecord) {
+async fn work(
+    state: &AppState,
+    tenant: &str,
+    internal_id: &str,
+    external: &str,
+    pool: &str,
+    task: TaskRecord,
+) {
     let worker = worker_id(external);
     let now = Utc::now;
     let fail = |class: ErrorClass, message: String, retryable: bool| FailureReport {
@@ -145,7 +161,18 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
     let assistant = match state.server_store.get_assistant(internal_id).await {
         Ok(Some(a)) => a,
         _ => {
-            let _ = fail_and_tell(state, tenant, &task, &worker, fail(ErrorClass::DependencyFailure, "the agent bound to this pool is gone".into(), true)).await;
+            let _ = fail_and_tell(
+                state,
+                tenant,
+                &task,
+                &worker,
+                fail(
+                    ErrorClass::DependencyFailure,
+                    "the agent bound to this pool is gone".into(),
+                    true,
+                ),
+            )
+            .await;
             return;
         }
     };
@@ -160,14 +187,34 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
         seed_length: None,
         created_at: Utc::now(),
     };
-    if let Err(error) = state.server_store.create_thread(&internal_thread_id, &record).await {
-        let _ = fail_and_tell(state, tenant, &task, &worker, fail(ErrorClass::Transient, format!("thread could not be created: {error}"), true)).await;
+    if let Err(error) = state
+        .server_store
+        .create_thread(&internal_thread_id, &record)
+        .await
+    {
+        let _ = fail_and_tell(
+            state,
+            tenant,
+            &task,
+            &worker,
+            fail(
+                ErrorClass::Transient,
+                format!("thread could not be created: {error}"),
+                true,
+            ),
+        )
+        .await;
         return;
     }
     // A task that names a world (resolved to its id at enqueue) is worked
     // in it: the run acts in the stand-in, and admission refuses the run if
     // the world is gone, so nothing reaches the live system.
-    let world = task.payload.get("world").and_then(Value::as_str).filter(|w| !w.is_empty()).map(str::to_owned);
+    let world = task
+        .payload
+        .get("world")
+        .and_then(Value::as_str)
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned);
     // The person who queued the work set this run going: it is attributed
     // to them (a pause at the gate tells them), while the run stays the
     // agent's own conversation — nobody's memory but the agent's is read.
@@ -176,21 +223,55 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
     if let Some(chain) = task.payload.get("chain") {
         run_metadata["chain"] = chain.clone();
     }
-    if let Some(who) = task.payload.get("enqueued_by").filter(|w| w.get("principal_id").is_some()) {
+    if let Some(who) = task
+        .payload
+        .get("enqueued_by")
+        .filter(|w| w.get("principal_id").is_some())
+    {
         run_metadata["created_by"] = who.clone();
     }
     let mut payload = RunPayload {
         input: Some(input_of(&task.payload)),
         metadata: Some(run_metadata),
         assistant_id: Some(external.to_string()),
-        config: world.map(|world| crate::runs::RunConfigPayload { world: Some(world), ..crate::runs::RunConfigPayload::default() }),
+        config: world.map(|world| crate::runs::RunConfigPayload {
+            world: Some(world),
+            ..crate::runs::RunConfigPayload::default()
+        }),
         ..RunPayload::default()
     };
-    crate::routes::apply_assistant_defaults(state, tenant, &internal_thread_id, &assistant, &mut payload).await;
-    let scheduled = match runs::schedule(&state.run_deps, &internal_thread_id, &thread_id, &assistant.graph, payload, MultitaskStrategy::Enqueue).await {
+    crate::routes::apply_assistant_defaults(
+        state,
+        tenant,
+        &internal_thread_id,
+        &assistant,
+        &mut payload,
+    )
+    .await;
+    let scheduled = match runs::schedule(
+        &state.run_deps,
+        &internal_thread_id,
+        &thread_id,
+        &assistant.graph,
+        payload,
+        MultitaskStrategy::Enqueue,
+    )
+    .await
+    {
         Ok(s) => s,
         Err(error) => {
-            let _ = fail_and_tell(state, tenant, &task, &worker, fail(ErrorClass::Transient, format!("the run was not accepted: {error}"), true)).await;
+            let _ = fail_and_tell(
+                state,
+                tenant,
+                &task,
+                &worker,
+                fail(
+                    ErrorClass::Transient,
+                    format!("the run was not accepted: {error}"),
+                    true,
+                ),
+            )
+            .await;
             return;
         }
     };
@@ -240,7 +321,12 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
             match decided {
                 Ok(Some(resumed)) => {
                     let left = DECISION_WAIT.saturating_sub(waited_from.elapsed());
-                    match tokio::time::timeout(left, crate::dataset_runs::wait_terminal(state, &resumed)).await {
+                    match tokio::time::timeout(
+                        left,
+                        crate::dataset_runs::wait_terminal(state, &resumed),
+                    )
+                    .await
+                    {
                         Ok(t) => {
                             terminal = t;
                             final_run_id = resumed;
@@ -273,7 +359,14 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
         let waited_from = std::time::Instant::now();
         for child in pending_delegated_from(state, &asked_from).await {
             let agent = match &child.assistant_id {
-                Some(id) => state.server_store.get_assistant(&crate::auth::scope_id(tenant, id)).await.ok().flatten().map(|a| a.name).unwrap_or_else(|| id.clone()),
+                Some(id) => state
+                    .server_store
+                    .get_assistant(&crate::auth::scope_id(tenant, id))
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|a| a.name)
+                    .unwrap_or_else(|| id.clone()),
                 None => child.graph.clone(),
             };
             let mut child_run = child.run_id.clone();
@@ -284,19 +377,30 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
                 if left.is_zero() {
                     break;
                 }
-                match wait_decided_keeping_lease(state, tenant, &task.task_id, &worker, &child_run, left).await {
+                match wait_decided_keeping_lease(
+                    state,
+                    tenant,
+                    &task.task_id,
+                    &worker,
+                    &child_run,
+                    left,
+                )
+                .await
+                {
                     Ok(Some((resumed, t))) => {
                         child_run = resumed;
                         if t.get("status").and_then(Value::as_str) == Some("interrupted") {
                             continue;
                         }
                         decided = "approved";
-                        reply = last_reply(state, &crate::auth::scope_id(tenant, &child.thread_id)).await;
+                        reply = last_reply(state, &crate::auth::scope_id(tenant, &child.thread_id))
+                            .await;
                         break;
                     }
                     Ok(None) => {
                         decided = "denied";
-                        reply = last_reply(state, &crate::auth::scope_id(tenant, &child.thread_id)).await;
+                        reply = last_reply(state, &crate::auth::scope_id(tenant, &child.thread_id))
+                            .await;
                         break;
                     }
                     Err(()) => break,
@@ -308,14 +412,28 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
                 final_run_id = child_run;
                 break;
             }
-            delegated.push(json!({"agent": agent, "run_id": child_run, "decided": decided, "reply": reply}));
+            delegated.push(
+                json!({"agent": agent, "run_id": child_run, "decided": decided, "reply": reply}),
+            );
         }
     }
-    let status = if undecided { "undecided" } else { terminal.get("status").and_then(Value::as_str).unwrap_or("") };
+    let status = if undecided {
+        "undecided"
+    } else {
+        terminal.get("status").and_then(Value::as_str).unwrap_or("")
+    };
     let spend = terminal.get("spend");
     let cost = SettlementCost {
-        tokens: spend.and_then(|s| s.get("tokens")).and_then(Value::as_u64).map(|t| rusty_agent_runtime::llm::Usage { total_tokens: t, ..Default::default() }),
-        cost_usd: spend.and_then(|s| s.get("cost_usd")).and_then(Value::as_f64),
+        tokens: spend
+            .and_then(|s| s.get("tokens"))
+            .and_then(Value::as_u64)
+            .map(|t| rusty_agent_runtime::llm::Usage {
+                total_tokens: t,
+                ..Default::default()
+            }),
+        cost_usd: spend
+            .and_then(|s| s.get("cost_usd"))
+            .and_then(Value::as_f64),
     };
     match status {
         "success" => {
@@ -337,8 +455,14 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
             } else {
                 None
             };
-            if let Some(v) = verdict.as_ref().filter(|v| v.get("verdict").and_then(Value::as_str) == Some("failed")) {
-                let reason = v.get("reason").and_then(Value::as_str).unwrap_or("no reason given");
+            if let Some(v) = verdict
+                .as_ref()
+                .filter(|v| v.get("verdict").and_then(Value::as_str) == Some("failed"))
+            {
+                let reason = v
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no reason given");
                 let mut report = fail(
                     ErrorClass::Transient,
                     format!("the verifier failed the run {final_run_id}: {reason}"),
@@ -363,7 +487,11 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
                 receipt: None,
                 cost,
             };
-            if let Err(error) = state.server_store.complete_task(tenant, &task.task_id, &worker, report, now()).await {
+            if let Err(error) = state
+                .server_store
+                .complete_task(tenant, &task.task_id, &worker, report, now())
+                .await
+            {
                 tracing::warn!(task = %task.task_id, %error, "pool worker: completion failed");
             }
         }
@@ -380,14 +508,25 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
             let _ = fail_and_tell(state, tenant, &task, &worker, report).await;
         }
         other => {
-            let message = terminal.get("message").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("the run ended {other}"));
+            let message = terminal
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("the run ended {other}"));
             let class = match terminal.get("error").and_then(Value::as_str) {
                 Some("budget_exhausted") => ErrorClass::InvalidInput,
                 Some("llm_error") => ErrorClass::Transient,
                 _ => ErrorClass::Transient,
             };
-            let retryable = !matches!(terminal.get("error").and_then(Value::as_str), Some("budget_exhausted"));
-            let mut report = fail(class, format!("run {}: {message}", scheduled.run_id), retryable);
+            let retryable = !matches!(
+                terminal.get("error").and_then(Value::as_str),
+                Some("budget_exhausted")
+            );
+            let mut report = fail(
+                class,
+                format!("run {}: {message}", scheduled.run_id),
+                retryable,
+            );
             report.cost = cost;
             let _ = fail_and_tell(state, tenant, &task, &worker, report).await;
         }
@@ -398,12 +537,29 @@ async fn work(state: &AppState, tenant: &str, internal_id: &str, external: &str,
 /// nobody will work it again — tell the person who queued it, once, in
 /// the Inbox: what it was, why it ended, and where to look. A failure the
 /// queue will retry says nothing; the board shows it.
-async fn fail_and_tell(state: &AppState, tenant: &str, task: &TaskRecord, worker: &str, report: FailureReport) -> crate::server_store::StoreResult<crate::tasks::MutationOutcome> {
-    let outcome = state.server_store.fail_task(tenant, &task.task_id, worker, report, Utc::now()).await?;
+async fn fail_and_tell(
+    state: &AppState,
+    tenant: &str,
+    task: &TaskRecord,
+    worker: &str,
+    report: FailureReport,
+) -> crate::server_store::StoreResult<crate::tasks::MutationOutcome> {
+    let outcome = state
+        .server_store
+        .fail_task(tenant, &task.task_id, worker, report, Utc::now())
+        .await?;
     if let Ok(Some(record)) = state.server_store.get_task(tenant, &task.task_id).await {
         if matches!(record.status, crate::tasks::TaskStatus::Dead) {
-            if let Some(who) = record.payload.get("enqueued_by").filter(|w| w.get("principal_id").is_some()).cloned() {
-                let reason = record.last_error.clone().unwrap_or_else(|| "it could not be done".to_owned());
+            if let Some(who) = record
+                .payload
+                .get("enqueued_by")
+                .filter(|w| w.get("principal_id").is_some())
+                .cloned()
+            {
+                let reason = record
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| "it could not be done".to_owned());
                 let title = format!("Your task {} could not be done", record.kind);
                 let text = format!("After {} attempt{} in pool {}: {reason} Open Work to read it; queue it again if it should be tried afresh.", record.attempt, if record.attempt == 1 { "" } else { "s" }, record.pool);
                 crate::notices::tell_in(
@@ -431,17 +587,45 @@ async fn last_reply(state: &AppState, internal_thread_id: &str) -> Value {
         .ok()
         .flatten()
         .map(|cp| cp.state.to_value())
-        .and_then(|v| v.get("messages")?.as_array()?.iter().rev().find(|m| m.get("role").and_then(Value::as_str) == Some("assistant") && m.get("content").and_then(Value::as_str).is_some_and(|c| !c.trim().is_empty())).and_then(|m| m.get("content").cloned()))
+        .and_then(|v| {
+            v.get("messages")?
+                .as_array()?
+                .iter()
+                .rev()
+                .find(|m| {
+                    m.get("role").and_then(Value::as_str) == Some("assistant")
+                        && m.get("content")
+                            .and_then(Value::as_str)
+                            .is_some_and(|c| !c.trim().is_empty())
+                })
+                .and_then(|m| m.get("content").cloned())
+        })
         .unwrap_or(Value::Null)
 }
 
 /// The pending approvals of runs the given runs asked (`agents.ask`): a
 /// delegated run names the asker in its metadata.
-async fn pending_delegated_from(state: &AppState, parents: &[String]) -> Vec<crate::approvals::ApprovalRecord> {
+async fn pending_delegated_from(
+    state: &AppState,
+    parents: &[String],
+) -> Vec<crate::approvals::ApprovalRecord> {
     let mut out = Vec::new();
-    for a in state.run_deps.approvals.list().into_iter().filter(|a| a.status == "pending") {
-        let Ok(Some(accepted)) = state.server_store.get_accepted_run(&a.run_id).await else { continue };
-        let from = accepted.payload.metadata.as_ref().and_then(|m| m.pointer("/delegation/from_run")).and_then(Value::as_str);
+    for a in state
+        .run_deps
+        .approvals
+        .list()
+        .into_iter()
+        .filter(|a| a.status == "pending")
+    {
+        let Ok(Some(accepted)) = state.server_store.get_accepted_run(&a.run_id).await else {
+            continue;
+        };
+        let from = accepted
+            .payload
+            .metadata
+            .as_ref()
+            .and_then(|m| m.pointer("/delegation/from_run"))
+            .and_then(Value::as_str);
         if from.is_some_and(|f| parents.iter().any(|p| p == f)) {
             out.push(a);
         }
@@ -453,7 +637,14 @@ async fn pending_delegated_from(state: &AppState, parents: &[String]) -> Vec<cra
 /// for the run it continued to end: `Ok(Some((resumed, terminal)))` once
 /// decided and ended, `Ok(None)` when denied, `Err(())` when no decision
 /// came within `left`.
-async fn wait_decided_keeping_lease(state: &AppState, tenant: &str, task_id: &str, worker: &str, run: &str, left: Duration) -> std::result::Result<Option<(String, Value)>, ()> {
+async fn wait_decided_keeping_lease(
+    state: &AppState,
+    tenant: &str,
+    task_id: &str,
+    worker: &str,
+    run: &str,
+    left: Duration,
+) -> std::result::Result<Option<(String, Value)>, ()> {
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     heartbeat.tick().await;
     let followed = async {
@@ -478,12 +669,28 @@ mod tests {
 
     #[test]
     fn a_payload_becomes_the_agents_message() {
-        assert_eq!(input_of(&json!({"message": "hi"}))["messages"][0]["content"], json!("hi"));
-        assert_eq!(input_of(&json!({"ask": "what?"}))["messages"][0]["content"], json!("what?"));
-        assert_eq!(input_of(&json!({"messages": [{"role": "user", "content": "as is"}]}))["messages"][0]["content"], json!("as is"));
-        let pretty = input_of(&json!({"order": 1}))["messages"][0]["content"].as_str().unwrap().to_owned();
+        assert_eq!(
+            input_of(&json!({"message": "hi"}))["messages"][0]["content"],
+            json!("hi")
+        );
+        assert_eq!(
+            input_of(&json!({"ask": "what?"}))["messages"][0]["content"],
+            json!("what?")
+        );
+        assert_eq!(
+            input_of(&json!({"messages": [{"role": "user", "content": "as is"}]}))["messages"][0]
+                ["content"],
+            json!("as is")
+        );
+        let pretty = input_of(&json!({"order": 1}))["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         assert!(pretty.contains("\"order\": 1"));
-        assert_eq!(pool_of(&json!({"studio_intent": {"pool": " briefs "}})), Some("briefs".into()));
+        assert_eq!(
+            pool_of(&json!({"studio_intent": {"pool": " briefs "}})),
+            Some("briefs".into())
+        );
         assert_eq!(pool_of(&json!({"studio_intent": {"pool": ""}})), None);
         assert_eq!(pool_of(&json!({})), None);
     }

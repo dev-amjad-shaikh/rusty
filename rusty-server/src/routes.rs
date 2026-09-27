@@ -11,22 +11,22 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use axum::{Extension, Json, Router, middleware};
+use axum::{middleware, Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use rusty_agent_runtime::agents::{
-    AgentId, COORDINATION_RESULT_KIND, CapabilityManifest, CoordinationContract, DelegateContract,
-    FanOutContract, QuorumContract, RaceContract, StateScope,
+    AgentId, CapabilityManifest, CoordinationContract, DelegateContract, FanOutContract,
+    QuorumContract, RaceContract, StateScope, COORDINATION_RESULT_KIND,
 };
+use rusty_agent_runtime::capsule::{derive_capsule_id, CapsuleManifest, CapsuleResolution};
 #[cfg(feature = "capsules")]
 use rusty_agent_runtime::capsule::{CapsuleDenial, CapsuleOverlay, ResourceBudget};
-use rusty_agent_runtime::capsule::{CapsuleManifest, CapsuleResolution, derive_capsule_id};
 use rusty_agent_runtime::checkpoint::{
     Checkpoint, Checkpointer, InMemoryCheckpointer, JsonFileCheckpointer,
 };
 use rusty_agent_runtime::durable::{
-    ResolvedRetryParameters, RetryDecision, resolve_retry_parameters, resolve_timeout_bound_ms,
-    retry_decision_event, timeout_decision_event,
+    resolve_retry_parameters, resolve_timeout_bound_ms, retry_decision_event,
+    timeout_decision_event, ResolvedRetryParameters, RetryDecision,
 };
 use rusty_agent_runtime::effects::ApprovalToken;
 use rusty_agent_runtime::gaps::{
@@ -36,45 +36,45 @@ use rusty_agent_runtime::gaps::{
     ResolutionPath,
 };
 use rusty_agent_runtime::induction::{
-    CoverageConfig, DEFAULT_BLOCK_CHAR_LIMIT, DEFAULT_FAILING_THRESHOLD_MILLIS, InductionError,
-    MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, join_maps, mine_intents,
-    seed_ledger,
+    crawl_coverage, declared_blocks, join_maps, mine_intents, seed_ledger, CoverageConfig,
+    InductionError, MiningConfig, SupplyArtifact, DEFAULT_BLOCK_CHAR_LIMIT,
+    DEFAULT_FAILING_THRESHOLD_MILLIS,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::learn::{
-    Candidate, CandidateContent, CandidateId, CandidateKind, CandidateOverlay, CandidateRecord,
-    CandidateStatus, DriftBaseline, DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError,
-    PromotionReceipt, PromotionRefusal, RollbackReceipt, VersionPointer, admit_promotion,
-    candidate_effect_key, detect_policy_drift, evaluation_effect_key, promotion_effect_key,
-    rollback_effect_key, surface_for_kind,
+    admit_promotion, candidate_effect_key, detect_policy_drift, evaluation_effect_key,
+    promotion_effect_key, rollback_effect_key, surface_for_kind, Candidate, CandidateContent,
+    CandidateId, CandidateKind, CandidateOverlay, CandidateRecord, CandidateStatus, DriftBaseline,
+    DriftThresholds, EnvironmentTag, EvaluationRequest, LearnError, PromotionReceipt,
+    PromotionRefusal, RollbackReceipt, VersionPointer,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::memory::{
-    Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason, MemoryEvidence,
-    MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord, MemoryScope,
-    MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow, assemble, detect_conflicts,
-    memory_effect_key, memory_forget_effect_key, memory_read_request, plan_forget,
+    assemble, detect_conflicts, memory_effect_key, memory_forget_effect_key, memory_read_request,
+    plan_forget, Candidacy, ContextBudget, Correction, CorrectionTarget, ForgetReason,
+    MemoryEvidence, MemoryForgetTombstone, MemoryKind, MemoryProvenance, MemoryQuery, MemoryRecord,
+    MemoryScope, MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
 use rusty_agent_runtime::record::{
-    CapsuleVersion, DecisionEvent, Effect, EffectReceipt, EventStatus, ExecutorPolicy, JournalRef,
-    PayloadRef, PolicyVersion, RunEvent, RunEventKind, derive_policy_version, sha256_hex,
+    derive_policy_version, sha256_hex, CapsuleVersion, DecisionEvent, Effect, EffectReceipt,
+    EventStatus, ExecutorPolicy, JournalRef, PayloadRef, PolicyVersion, RunEvent, RunEventKind,
 };
-use rusty_agent_runtime::registry::{ArtifactRecord, RegistryError, diff_candidates};
+use rusty_agent_runtime::registry::{diff_candidates, ArtifactRecord, RegistryError};
 use rusty_agent_runtime::replay::{BranchDiff, ExactReplay, ReplayFixture, ReplayParams};
 use rusty_agent_runtime::scope::{Scope, ScopeTable};
 use rusty_agent_runtime::state::State;
 use rusty_agent_runtime::team_trace::TeamTrace;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use crate::agents::{
     self, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim, MailboxClaimScope,
 };
 use crate::assistants::{
-    ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ActivateVersionOutcome,
-    AssistantRecord, AssistantVersionRecord, AssistantVersionView, AssistantView,
-    CreateVersionOutcome, DeclineVersionOutcome, SetLifecycleOutcome, valid_version_id,
+    valid_version_id, ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord,
+    AssistantVersionView, AssistantView, CreateVersionOutcome, DeclineVersionOutcome,
+    SetLifecycleOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT,
 };
 use crate::auth::TenantContext;
 use crate::capsules::{CapsuleRecord, CapsuleWrite};
@@ -93,7 +93,7 @@ use crate::supervision;
 use crate::tasks::{self, CancelOutcome, MutationOutcome, TaskRecord, TaskStatus};
 use crate::threads::ThreadRecord;
 use crate::triggers;
-use crate::{GraphRegistry, RESERVED_NAMES, ServerConfig, store};
+use crate::{store, GraphRegistry, ServerConfig, RESERVED_NAMES};
 
 /// Shared application state.
 pub(crate) struct AppState {
@@ -4415,7 +4415,7 @@ fn assistant_tool_overlays(
     config: &Value,
     allowed: Option<&[String]>,
 ) -> std::collections::BTreeMap<String, rusty_agent_runtime::tool_select::ToolSelectionOverlay> {
-    use rusty_agent_runtime::tool_select::{MAX_WHEN_TO_USE_BYTES, ToolSelectionOverlay};
+    use rusty_agent_runtime::tool_select::{ToolSelectionOverlay, MAX_WHEN_TO_USE_BYTES};
     let mut overlays = std::collections::BTreeMap::new();
     let Some(tools) = config
         .pointer("/studio_intent/tools")
@@ -4837,7 +4837,7 @@ pub(crate) async fn file_dependency_gaps(
     skill_names: &[String],
 ) {
     use rusty_agent_runtime::gaps::{
-        Citation, CitationKind, ClosureCriteria, GapOrigin, GapSubject, tool_available,
+        tool_available, Citation, CitationKind, ClosureCriteria, GapOrigin, GapSubject,
     };
     use rusty_agent_runtime::skill::DependencyDecl;
     let available = available_tool_names(state);
@@ -5525,12 +5525,10 @@ async fn list_runs(
     // filtering after was both slow (a thousand heads) and still blind past
     // the window's edge.
     let recalled = recall_runs_for(&state, &tenant, limit, wanted).await?;
-    Ok(Json(json!(
-        recalled
-            .into_iter()
-            .map(RecalledRun::into_wire)
-            .collect::<Vec<_>>()
-    )))
+    Ok(Json(json!(recalled
+        .into_iter()
+        .map(RecalledRun::into_wire)
+        .collect::<Vec<_>>())))
 }
 
 /// The caller's runs, newest first, at most `limit`: the live registry's
@@ -9027,12 +9025,10 @@ async fn enqueue_task(
             record.payload["world_name"] = json!(first.name);
         }
         if resolved.len() > 1 {
-            record.payload["worlds"] = json!(
-                resolved
-                    .iter()
-                    .map(|w| w.world_id.clone())
-                    .collect::<Vec<_>>()
-            );
+            record.payload["worlds"] = json!(resolved
+                .iter()
+                .map(|w| w.world_id.clone())
+                .collect::<Vec<_>>());
             record.payload["world_names"] =
                 json!(resolved.iter().map(|w| w.name.clone()).collect::<Vec<_>>());
         } else if let Some(obj) = record.payload.as_object_mut() {
@@ -15532,22 +15528,20 @@ async fn cancel_one_agent(
     let signalled = ids(outcome.signalled);
     let mut exit_event = Value::Null;
     if !cancelled.is_empty() || !signalled.is_empty() || !run_outcome.is_empty() {
-        exit_event = json!(
-            supervision::journal_agent_exit(
-                &state.server_store,
-                tenant,
-                agent_external,
-                "cancelled",
-                json!({
-                    "cancelled_messages": cancelled,
-                    "signalled_messages": signalled,
-                    "signalled_runs": run_outcome.signalled,
-                    "cancelled_runs": run_outcome.cancelled,
-                }),
-            )
-            .await
-            .map_err(internal_err)?
-        );
+        exit_event = json!(supervision::journal_agent_exit(
+            &state.server_store,
+            tenant,
+            agent_external,
+            "cancelled",
+            json!({
+                "cancelled_messages": cancelled,
+                "signalled_messages": signalled,
+                "signalled_runs": run_outcome.signalled,
+                "cancelled_runs": run_outcome.cancelled,
+            }),
+        )
+        .await
+        .map_err(internal_err)?);
     }
     Ok(json!({
         "agent_id": agent_external,

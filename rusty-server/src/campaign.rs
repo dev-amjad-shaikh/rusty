@@ -18,7 +18,7 @@ use axum::{Extension, Json};
 use rusty_agent_runtime::record::RunEventKind;
 use rusty_agent_runtime::tool::ToolFailure;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;

@@ -24,7 +24,13 @@ impl ChatModel for Cached {
         Ok(ChatResponse {
             message: ChatMessage::assistant("noted"),
             model: Some("cached-model".into()),
-            usage: Some(Usage { prompt_tokens: 400, completion_tokens: 5, total_tokens: 405, cached_tokens: Some(360), ..Usage::default() }),
+            usage: Some(Usage {
+                prompt_tokens: 400,
+                completion_tokens: 5,
+                total_tokens: 405,
+                cached_tokens: Some(360),
+                ..Usage::default()
+            }),
         })
     }
 }
@@ -35,8 +41,16 @@ fn app() -> (Router, std::path::PathBuf) {
     let graph = create_react_agent(Arc::new(Cached), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
-    (router(registry, ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())), store)
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
+    (
+        router(
+            registry,
+            ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()),
+        ),
+        store,
+    )
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -48,25 +62,53 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
 async fn cached_prompt_tokens_are_journaled_summed_per_run_and_rated_per_model() {
     let (app, store) = app();
-    let (_, thread) = call(&app, "POST", "/threads", Some(json!({"graph": "react_agent"}))).await;
+    let (_, thread) = call(
+        &app,
+        "POST",
+        "/threads",
+        Some(json!({"graph": "react_agent"})),
+    )
+    .await;
     let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
-    let (status, run) = call(&app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(json!({"input": {"messages": [{"role": "user", "content": "hello"}]}}))).await;
+    let (status, run) = call(
+        &app,
+        "POST",
+        &format!("/threads/{thread_id}/runs/wait"),
+        Some(json!({"input": {"messages": [{"role": "user", "content": "hello"}]}})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{run}");
     let run_id = run["run_id"].as_str().unwrap().to_owned();
 
     // The journal keeps the provider's cache figure on the model call.
     let (_, events) = call(&app, "GET", &format!("/runs/{run_id}/events"), None).await;
-    let model_call = events["events"].as_array().unwrap().iter().find(|e| e["kind"] == "model_call").expect("a model call");
-    assert_eq!(model_call["tokens"]["cached_tokens"], json!(360), "{model_call}");
+    let model_call = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "model_call")
+        .expect("a model call");
+    assert_eq!(
+        model_call["tokens"]["cached_tokens"],
+        json!(360),
+        "{model_call}"
+    );
 
     // The run sums it.
     let (status, run) = call(&app, "GET", &format!("/runs/{run_id}"), None).await;
@@ -75,7 +117,10 @@ async fn cached_prompt_tokens_are_journaled_summed_per_run_and_rated_per_model()
     assert_eq!(run["usage"]["prompt_tokens"], json!(400));
     assert_eq!(run["usage"]["cached_tokens"], json!(360));
     assert_eq!(run["usage"]["cache_reported_calls"], json!(1));
-    assert!((run["usage"]["cache_hit_rate"].as_f64().unwrap() - 0.9).abs() < 1e-9, "{run}");
+    assert!(
+        (run["usage"]["cache_hit_rate"].as_f64().unwrap() - 0.9).abs() < 1e-9,
+        "{run}"
+    );
 
     // The providers page rates it per model over the newest runs.
     let (status, providers) = call(&app, "GET", "/llm/providers?cache=1", None).await;

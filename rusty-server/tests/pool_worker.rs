@@ -21,8 +21,17 @@ struct EchoModel;
 #[async_trait]
 impl ChatModel for EchoModel {
     async fn chat(&self, messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
-        let asked = messages.iter().rev().find(|m| m.role == Role::User).and_then(|m| m.content.clone()).unwrap_or_default();
-        Ok(ChatResponse { message: ChatMessage::assistant(format!("You asked: {asked}. The answer is 42.")), model: Some("echo".into()), usage: None })
+        let asked = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
+        Ok(ChatResponse {
+            message: ChatMessage::assistant(format!("You asked: {asked}. The answer is 42.")),
+            model: Some("echo".into()),
+            usage: None,
+        })
     }
 }
 
@@ -33,7 +42,11 @@ struct InventingModel;
 #[async_trait]
 impl ChatModel for InventingModel {
     async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("Filed INC0099999 for you.".to_owned()), model: Some("inventor".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("Filed INC0099999 for you.".to_owned()),
+            model: Some("inventor".into()),
+            usage: None,
+        })
     }
 }
 
@@ -55,8 +68,11 @@ fn verified_app() -> (Router, PathBuf) {
     let graph = create_react_agent(Arc::new(InventingModel), tools.clone()).unwrap();
     let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("inventor", graph, spec, &tools).unwrap();
-    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()).with_verifier(Arc::new(NeverAsked));
+    registry
+        .register_with_tools("inventor", graph, spec, &tools)
+        .unwrap();
+    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())
+        .with_verifier(Arc::new(NeverAsked));
     (router(registry, config), store)
 }
 
@@ -67,7 +83,9 @@ fn test_app() -> (Router, PathBuf) {
     let graph = create_react_agent(Arc::new(EchoModel), tools.clone()).unwrap();
     let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("capable", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("capable", graph, spec, &tools)
+        .unwrap();
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone());
     (router(registry, config), store)
 }
@@ -75,20 +93,33 @@ fn test_app() -> (Router, PathBuf) {
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
     let body = match body {
-        Some(value) => { builder = builder.header("content-type", "application/json"); Body::from(value.to_string()) }
+        Some(value) => {
+            builder = builder.header("content-type", "application/json");
+            Body::from(value.to_string())
+        }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes: Bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
     (status, value)
 }
 
 async fn settled(app: &Router, task_id: &str) -> Value {
     for _ in 0..200 {
         let (_, t) = call(app, "GET", &format!("/tasks/{task_id}"), None).await;
-        if matches!(t["status"].as_str(), Some("completed" | "failed" | "dead")) { return t; }
+        if matches!(t["status"].as_str(), Some("completed" | "failed" | "dead")) {
+            return t;
+        }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     let (_, t) = call(app, "GET", &format!("/tasks/{task_id}"), None).await;
@@ -107,14 +138,26 @@ async fn an_agent_bound_to_a_pool_works_its_tasks_as_real_runs() {
     // A task in the agent's pool and one in another.
     let (status, mine) = call(&app, "POST", "/tasks", Some(json!({"kind": "brief", "pool": "briefs", "payload": {"message": "How far is 5 miles in km?"}}))).await;
     assert_eq!(status, StatusCode::CREATED, "{mine}");
-    let (_, other) = call(&app, "POST", "/tasks", Some(json!({"kind": "brief", "pool": "elsewhere", "payload": {"message": "nobody's"}}))).await;
+    let (_, other) = call(
+        &app,
+        "POST",
+        "/tasks",
+        Some(json!({"kind": "brief", "pool": "elsewhere", "payload": {"message": "nobody's"}})),
+    )
+    .await;
     let mine_id = mine["task_id"].as_str().unwrap().to_string();
     let other_id = other["task_id"].as_str().unwrap().to_string();
 
     let done = settled(&app, &mine_id).await;
-    assert_eq!(done["status"], json!("completed"), "the agent settled it: {done}");
+    assert_eq!(
+        done["status"],
+        json!("completed"),
+        "the agent settled it: {done}"
+    );
     assert_eq!(done["lease"], Value::Null);
-    let reply = done["result"]["reply"].as_str().expect("the reply is the result");
+    let reply = done["result"]["reply"]
+        .as_str()
+        .expect("the reply is the result");
     assert!(reply.contains("42"), "{reply}");
     assert_eq!(done["result"]["agent"], json!("briefer"));
     // The run is an ordinary run, in Observe, with the pool as its channel.
@@ -146,7 +189,11 @@ async fn a_task_is_settled_by_its_runs_verdict_not_by_the_run_ending() {
     // The run ends in success and names INC0099999, which no tool returned:
     // the verifier fails it, and the task is not completed with that reply.
     let done = settled(&app, &task_id).await;
-    assert_ne!(done["status"], json!("completed"), "a failed verdict is not a result: {done}");
+    assert_ne!(
+        done["status"],
+        json!("completed"),
+        "a failed verdict is not a result: {done}"
+    );
     let text = done.to_string();
     assert!(text.contains("the verifier failed the run"), "{done}");
     assert!(text.contains("INC0099999"), "{done}");
@@ -156,14 +203,36 @@ async fn a_task_is_settled_by_its_runs_verdict_not_by_the_run_ending() {
     let mut told = Value::Null;
     for _ in 0..50 {
         let (_, notices) = call(&app, "GET", "/notices", None).await;
-        if let Some(n) = notices["notices"].as_array().and_then(|a| a.iter().find(|n| n["about"]["task_id"] == json!(task_id))) { told = n.clone(); break; }
+        if let Some(n) = notices["notices"]
+            .as_array()
+            .and_then(|a| a.iter().find(|n| n["about"]["task_id"] == json!(task_id)))
+        {
+            told = n.clone();
+            break;
+        }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert!(!told.is_null(), "the queuer is told");
-    assert_eq!(told["title"], json!("Your task file could not be done"), "{told}");
+    assert_eq!(
+        told["title"],
+        json!("Your task file could not be done"),
+        "{told}"
+    );
     assert_eq!(told["about"]["state"], json!("dead"));
-    assert!(told["text"].as_str().unwrap_or("").contains("the verifier failed the run"), "{told}");
-    assert!(told["text"].as_str().unwrap_or("").contains("After 1 attempt in pool filing"), "{told}");
+    assert!(
+        told["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("the verifier failed the run"),
+        "{told}"
+    );
+    assert!(
+        told["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("After 1 attempt in pool filing"),
+        "{told}"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -190,13 +259,27 @@ async fn a_task_that_names_a_world_is_worked_in_that_world() {
     assert_eq!(status, StatusCode::CREATED, "{mine}");
     let mine_id = mine["task_id"].as_str().unwrap().to_string();
     let (_, kept) = call(&app, "GET", &format!("/tasks/{mine_id}"), None).await;
-    assert_eq!(kept["payload"]["world"], json!(world_id), "the payload names the world by id: {kept}");
+    assert_eq!(
+        kept["payload"]["world"],
+        json!(world_id),
+        "the payload names the world by id: {kept}"
+    );
     assert_eq!(kept["payload"]["world_name"], json!("ledger-twin"));
     let done = settled(&app, &mine_id).await;
     assert_eq!(done["status"], json!("completed"), "{done}");
     let run_id = done["result"]["run_id"].as_str().unwrap();
     let (_, events) = call(&app, "GET", &format!("/runs/{run_id}/events"), None).await;
-    let declared = events["events"].as_array().unwrap().iter().find(|e| e["kind"] == json!("run_config_declared")).cloned().unwrap_or(Value::Null);
-    assert_eq!(declared["output"]["value"]["world"], json!(world_id), "the run was worked in the world: {declared}");
+    let declared = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == json!("run_config_declared"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(
+        declared["output"]["value"]["world"],
+        json!(world_id),
+        "the run was worked in the world: {declared}"
+    );
     let _ = std::fs::remove_dir_all(store);
 }

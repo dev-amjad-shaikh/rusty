@@ -17,9 +17,9 @@ use axum::extract::{Path, State as AxumState};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
-use rusty_agent_runtime::memory::{MemoryQuery, MemoryScope, ScopeAddress, plan_forget};
+use rusty_agent_runtime::memory::{plan_forget, MemoryQuery, MemoryScope, ScopeAddress};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;

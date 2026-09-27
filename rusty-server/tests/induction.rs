@@ -10,11 +10,11 @@
 
 use std::path::PathBuf;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use axum::Router;
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 // --------------------------------------------------------------------- //
@@ -220,13 +220,11 @@ async fn the_pass_mines_crawls_and_joins_in_one_call() {
     // working supply everywhere, nothing seeded (dry run is the
     // default).
     assert_eq!(v["matrix"]["rows"].as_array().unwrap().len(), 2);
-    assert!(
-        v["matrix"]["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["cell"] == json!("working_supply"))
-    );
+    assert!(v["matrix"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["cell"] == json!("working_supply")));
     assert_eq!(v["seeded_gap_ids"], json!([]));
     let (status, v2) = call(&app, "GET", "/gaps", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -278,18 +276,14 @@ async fn seeding_files_the_learn_now_cell_and_converges_on_a_re_run() {
     assert_eq!(status, StatusCode::OK);
     let order = v2["work_order"].as_array().unwrap();
     assert_eq!(order.len(), 2);
-    assert!(
-        order
-            .iter()
-            .all(|entry| entry["origin"] == json!("induction"))
-    );
+    assert!(order
+        .iter()
+        .all(|entry| entry["origin"] == json!("induction")));
     // The vpn intent leads the work order.
-    assert!(
-        order[0]["subject"]["intent"]["intent_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("in-")
-    );
+    assert!(order[0]["subject"]["intent"]["intent_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("in-"));
 
     // A seeded re-run converges: same ids, reinforcement not
     // duplication.

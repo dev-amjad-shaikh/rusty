@@ -797,7 +797,6 @@ impl ChatModel for MiddlewareChatModel {
         self.inner.effect()
     }
 
-
     fn pricing(&self) -> Option<crate::llm::ModelPricing> {
         self.inner.pricing()
     }

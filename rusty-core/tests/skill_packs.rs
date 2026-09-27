@@ -12,19 +12,19 @@ use std::path::{Path, PathBuf};
 
 use rusty_agent_runtime::skill::{SkillPromotionStatus, SkillRegistry, SkillSource};
 use rusty_agent_runtime::skill_pack::{
-    DependencyChange, DependencyEnvironment, GateRunOutcome, GatewayCapability, LoadedSkill,
-    RevalidationOutcome, SkillDependency, SkillGateRunner, SkillInstallDisposition, SkillPack,
-    SkillPackLedger, SkillPackMutation, SkillUpdateDisposition, apply_dependency_change,
-    apply_pack_update, install_skill_pack,
+    apply_dependency_change, apply_pack_update, install_skill_pack, DependencyChange,
+    DependencyEnvironment, GateRunOutcome, GatewayCapability, LoadedSkill, RevalidationOutcome,
+    SkillDependency, SkillGateRunner, SkillInstallDisposition, SkillPack, SkillPackLedger,
+    SkillPackMutation, SkillUpdateDisposition,
 };
 use rusty_eval::assertion::Assertion;
 use rusty_eval::dataset::Dataset;
 use rusty_eval::evidence::RunEvidence;
 use rusty_eval::experiment::{
-    AssertionPassRate, CaseReport, CaseRunReport, ExperimentReport, LatencyStats,
-    REPORT_FORMAT_VERSION, ReportSummary,
+    AssertionPassRate, CaseReport, CaseRunReport, ExperimentReport, LatencyStats, ReportSummary,
+    REPORT_FORMAT_VERSION,
 };
-use rusty_eval::gate::{GatePolicy, evaluate_gate};
+use rusty_eval::gate::{evaluate_gate, GatePolicy};
 
 fn catalog_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -308,33 +308,27 @@ fn all_five_packs_load_as_conformant_packages() {
 #[test]
 fn declared_dependencies_match_the_story_contract() {
     let kb = load_pack("kb-answer-with-citations");
-    assert!(
-        kb.skills[0]
-            .entry
-            .dependencies
-            .iter()
-            .any(|dep| matches!(dep, SkillDependency::Tool { name } if name == "kb_search"))
-    );
+    assert!(kb.skills[0]
+        .entry
+        .dependencies
+        .iter()
+        .any(|dep| matches!(dep, SkillDependency::Tool { name } if name == "kb_search")));
 
     let digest = load_pack("scheduled-digest");
-    assert!(
-        digest.skills[0]
-            .entry
-            .dependencies
-            .iter()
-            .any(|dep| matches!(dep, SkillDependency::Gateway { capability }
-            if *capability == GatewayCapability::ScheduledAutonomy))
-    );
+    assert!(digest.skills[0]
+        .entry
+        .dependencies
+        .iter()
+        .any(|dep| matches!(dep, SkillDependency::Gateway { capability }
+            if *capability == GatewayCapability::ScheduledAutonomy)));
 
     let forms = load_pack("form-filling");
-    assert!(
-        forms.skills[0]
-            .entry
-            .dependencies
-            .iter()
-            .any(|dep| matches!(dep, SkillDependency::Gateway { capability }
-            if *capability == GatewayCapability::StructuredInput))
-    );
+    assert!(forms.skills[0]
+        .entry
+        .dependencies
+        .iter()
+        .any(|dep| matches!(dep, SkillDependency::Gateway { capability }
+            if *capability == GatewayCapability::StructuredInput)));
 }
 
 // ---------------------------------------------------------------------------
@@ -459,11 +453,9 @@ fn install_refuses_skills_whose_dependencies_the_tenant_lacks() {
     .expect("install runs");
     match &outcomes[0].disposition {
         SkillInstallDisposition::MissingDependencies { missing } => {
-            assert!(
-                missing.iter().any(
-                    |dep| matches!(dep, SkillDependency::Tool { name } if name == "kb_search")
-                )
-            );
+            assert!(missing
+                .iter()
+                .any(|dep| matches!(dep, SkillDependency::Tool { name } if name == "kb_search")));
         }
         other => panic!("missing tool must block the install, got {other:?}"),
     }
@@ -520,12 +512,10 @@ fn connector_major_bump_flags_and_revalidates() {
             trigger: DependencyChange::ConnectorMajorChanged { id, new_major: 2 }
         } if id == "knowledge-base"
     )));
-    assert!(
-        record
-            .ledger
-            .iter()
-            .any(|entry| matches!(&entry.mutation, SkillPackMutation::Revalidated { .. }))
-    );
+    assert!(record
+        .ledger
+        .iter()
+        .any(|entry| matches!(&entry.mutation, SkillPackMutation::Revalidated { .. })));
     assert!(record.revalidation_pending.is_none());
     assert_eq!(record.status, SkillPromotionStatus::Promoted);
 }
@@ -560,12 +550,10 @@ fn failed_revalidation_demotes_to_trial_with_the_trigger_named() {
     .expect("revalidation runs");
 
     match &outcomes[..] {
-        [
-            RevalidationOutcome::Demoted {
-                skill_name,
-                failing_cases,
-            },
-        ] => {
+        [RevalidationOutcome::Demoted {
+            skill_name,
+            failing_cases,
+        }] => {
             assert_eq!(skill_name, "kb-answer-with-citations");
             assert!(failing_cases.contains(&"grounded-answer".to_owned()));
         }
@@ -699,12 +687,10 @@ fn update_to_unpatched_skill_registers_and_regates() {
     assert_ne!(record.content_hash, installed_hash, "the update landed");
     assert_eq!(record.package_version, "1.1.0");
     assert_eq!(record.status, SkillPromotionStatus::Promoted);
-    assert!(
-        record
-            .ledger
-            .iter()
-            .any(|entry| matches!(&entry.mutation, SkillPackMutation::Updated { .. }))
-    );
+    assert!(record
+        .ledger
+        .iter()
+        .any(|entry| matches!(&entry.mutation, SkillPackMutation::Updated { .. })));
 
     std::fs::remove_dir_all(&next_dir).expect("temp pack cleaned");
 }

@@ -21,7 +21,11 @@ struct AnswerModel;
 #[async_trait]
 impl ChatModel for AnswerModel {
     async fn chat(&self, _messages: &[ChatMessage], _tools: &[Value]) -> Result<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("42"), model: Some("answer-test".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("42"),
+            model: Some("answer-test".into()),
+            usage: None,
+        })
     }
 }
 
@@ -32,7 +36,9 @@ fn test_app_at(store: PathBuf) -> Router {
     let graph = create_react_agent(Arc::new(AnswerModel), tools.clone()).unwrap();
     let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("capable", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("capable", graph, spec, &tools)
+        .unwrap();
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store);
     router(registry, config)
 }
@@ -46,10 +52,18 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes: Bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
     (status, value)
 }
 
@@ -94,7 +108,11 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
     assert_eq!(status, StatusCode::OK, "{v}");
     let accepted = v["input"].clone();
     let messages = accepted["messages"].as_array().expect("messages");
-    assert_eq!(messages.last().unwrap(), &input()["messages"][0], "{accepted}");
+    assert_eq!(
+        messages.last().unwrap(),
+        &input()["messages"][0],
+        "{accepted}"
+    );
     assert_eq!(v["assistant_id"], json!("keeper"));
     drop(app);
 
@@ -106,12 +124,21 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
     assert_eq!(v["input"], accepted, "the exact accepted input survives");
     assert_eq!(v["assistant_id"], json!("keeper"));
     assert_eq!(v["thread_id"], json!(thread));
-    assert_eq!(v["status"], json!("success"), "the journal's verdict is the status");
+    assert_eq!(
+        v["status"],
+        json!("success"),
+        "the journal's verdict is the status"
+    );
 
     // The listing keeps the run's agent.
     let (status, list) = call(&app, "GET", "/runs", None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    let listed = list.as_array().unwrap().iter().find(|r| r["run_id"] == json!(run_id)).expect("listed after restart");
+    let listed = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["run_id"] == json!(run_id))
+        .expect("listed after restart");
     assert_eq!(listed["assistant_id"], json!("keeper"), "{listed}");
 
     // A case binds to the recovered run.
@@ -132,7 +159,11 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "a case binds after a restart: {v}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a case binds after a restart: {v}"
+    );
     assert_eq!(v["case_count"], json!(1));
 
     // A run no server accepted stays unknown.
@@ -156,7 +187,11 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
     let (_, second) = call(&app, "GET", &format!("/runs/{second_run}"), None).await;
     std::fs::remove_file(store.join("accepted_runs").join(format!("{run_id}.json"))).unwrap();
     let (status, _) = call(&app, "GET", &format!("/runs/{run_id}"), None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "the first run's record is gone");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the first run's record is gone"
+    );
     let second_case = json!({
         "id": "answers-again",
         "input": second["input"],
@@ -171,7 +206,11 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
         Some(json!({"name": "keeper", "version": "v2", "cases": [held.clone(), second_case.clone()]})),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "grows past its gone evidence: {v}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "grows past its gone evidence: {v}"
+    );
     assert_eq!(v["case_count"], json!(2));
 
     // A changed case is a new claim, and its run is gone: refused.
@@ -184,7 +223,11 @@ async fn a_finished_run_is_recalled_after_a_restart_and_can_become_a_case() {
         Some(json!({"name": "keeper", "version": "v3", "cases": [altered, second_case]})),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "an altered case needs its run: {v}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "an altered case needs its run: {v}"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }

@@ -218,7 +218,11 @@ impl ExpectedWorldWrite {
         self.fields
             .iter()
             .map(|(p, v)| format!("{} = {v}", p.trim_start_matches('/')))
-            .chain(self.like.iter().map(|(p, t)| format!("{} ~ {t}", p.trim_start_matches('/'))))
+            .chain(
+                self.like
+                    .iter()
+                    .map(|(p, t)| format!("{} ~ {t}", p.trim_start_matches('/'))),
+            )
             .collect::<Vec<_>>()
             .join(", ")
     }

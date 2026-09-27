@@ -296,7 +296,10 @@ async fn journal_snapshot_is_persisted_to_disk_and_reverifies() {
     let path = store.join("journals").join(format!("{run_id}.json"));
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let vault = rusty_agent_server::vault::PersonVault::new(&store);
-    let snapshot: JournalSnapshot = rusty_agent_server::vault::record_from_bytes(Some(&vault), "journal", &run_id, &bytes).unwrap().expect("the journal opens with the key beside it");
+    let snapshot: JournalSnapshot =
+        rusty_agent_server::vault::record_from_bytes(Some(&vault), "journal", &run_id, &bytes)
+            .unwrap()
+            .expect("the journal opens with the key beside it");
     assert_eq!(snapshot.run_id, run_id);
     assert_eq!(snapshot.thread_id, thread);
 

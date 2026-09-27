@@ -27,7 +27,7 @@ use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::goals::{Goal, GoalPhase, GoalProvenance};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::auth::TenantContext;

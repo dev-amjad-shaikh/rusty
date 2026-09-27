@@ -122,14 +122,22 @@ impl Plan {
                 "skipped" | "skip" => "skipped".to_owned(),
                 _ => "todo".to_owned(),
             };
-            step.note = step.note.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(|n| n.chars().take(200).collect());
+            step.note = step
+                .note
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(|n| n.chars().take(200).collect());
         }
         (!plan.steps.is_empty()).then_some(plan)
     }
 
     /// Steps not done and not skipped.
     pub fn open(&self) -> Vec<&PlanStep> {
-        self.steps.iter().filter(|s| s.status == "todo" || s.status == "doing").collect()
+        self.steps
+            .iter()
+            .filter(|s| s.status == "todo" || s.status == "doing")
+            .collect()
     }
 
     pub fn done(&self) -> usize {
@@ -163,7 +171,12 @@ pub fn latest_plan(messages: &[ChatMessage]) -> Option<(usize, Plan)> {
         if m.role != crate::llm::Role::Assistant {
             return None;
         }
-        m.tool_calls.iter().rev().find(|c| c.name == PLAN_TOOL).and_then(|c| Plan::parse(&c.arguments)).map(|p| (i, p))
+        m.tool_calls
+            .iter()
+            .rev()
+            .find(|c| c.name == PLAN_TOOL)
+            .and_then(|c| Plan::parse(&c.arguments))
+            .map(|p| (i, p))
     })
 }
 
@@ -171,12 +184,21 @@ pub fn latest_plan(messages: &[ChatMessage]) -> Option<(usize, Plan)> {
 /// check is made once per plan, so a model that answers past it is not
 /// nudged forever.
 pub fn plan_checked_since(messages: &[ChatMessage], plan_at: usize) -> bool {
-    messages[plan_at..].iter().any(|m| m.role == crate::llm::Role::System && m.content.as_deref().is_some_and(|c| c.starts_with(PLAN_NOTICE_PREFIX)))
+    messages[plan_at..].iter().any(|m| {
+        m.role == crate::llm::Role::System
+            && m.content
+                .as_deref()
+                .is_some_and(|c| c.starts_with(PLAN_NOTICE_PREFIX))
+    })
 }
 
 /// The notice a final answer with open steps gets, once.
 pub fn plan_notice(plan: &Plan) -> String {
-    let open: Vec<String> = plan.open().iter().map(|s| format!("[{}] {}", s.status, s.text)).collect();
+    let open: Vec<String> = plan
+        .open()
+        .iter()
+        .map(|s| format!("[{}] {}", s.status, s.text))
+        .collect();
     format!(
         "{PLAN_NOTICE_PREFIX} your plan has {} step{} not done: {}. Finish them, or mark each one skipped with a reason by calling `plan` again, then answer. Do not answer with steps still open.",
         open.len(),
@@ -272,7 +294,9 @@ pub fn situation_text(
     );
     match counterpart {
         Some(crate::tool::Counterpart::Person(person)) => {
-            text.push_str(&format!(" This conversation is with {person}; \"you\" means them."));
+            text.push_str(&format!(
+                " This conversation is with {person}; \"you\" means them."
+            ));
         }
         Some(crate::tool::Counterpart::Nobody) => {
             text.push_str(
@@ -585,7 +609,10 @@ fn denied_calls(resume: Option<&Value>) -> std::collections::HashMap<String, Str
     {
         return denied;
     }
-    let by = value.get("by").and_then(Value::as_str).unwrap_or("a person");
+    let by = value
+        .get("by")
+        .and_then(Value::as_str)
+        .unwrap_or("a person");
     let reason = value
         .get("reason")
         .and_then(Value::as_str)
@@ -595,7 +622,12 @@ fn denied_calls(resume: Option<&Value>) -> std::collections::HashMap<String, Str
     let notice = format!(
         "{DENIED_NOTICE} ({by}{reason}). Do not retry it or work around it; say what you would have done and finish."
     );
-    for id in value.get("call_ids").and_then(Value::as_array).into_iter().flatten() {
+    for id in value
+        .get("call_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if let Some(id) = id.as_str() {
             denied.insert(id.to_owned(), notice.clone());
         }
@@ -712,7 +744,11 @@ fn stale_results_in_a_row(messages: &[ChatMessage]) -> usize {
             }
         }
     }
-    let is_result = |content: &str| !content.trim_start().starts_with("ERROR:") && content != REPEATED_CALL_NOTICE && content != NO_NEW_FACT_NOTICE;
+    let is_result = |content: &str| {
+        !content.trim_start().starts_with("ERROR:")
+            && content != REPEATED_CALL_NOTICE
+            && content != NO_NEW_FACT_NOTICE
+    };
     let mut seen: Vec<String> = Vec::new();
     let mut stale_of: Vec<Option<bool>> = Vec::with_capacity(batches.len());
     for batch in &batches {
@@ -731,8 +767,15 @@ fn stale_results_in_a_row(messages: &[ChatMessage]) -> usize {
     }
     // This turn's batches only: a person's new message is progress, and
     // the reads before it answered their question, not this one.
-    let turn_start = messages.iter().rposition(|m| m.role == crate::llm::Role::User).map(|i| i + 1).unwrap_or(0);
-    let turn_batches = messages[turn_start..].iter().filter(|m| m.role == crate::llm::Role::Assistant && m.has_tool_calls()).count();
+    let turn_start = messages
+        .iter()
+        .rposition(|m| m.role == crate::llm::Role::User)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let turn_batches = messages[turn_start..]
+        .iter()
+        .filter(|m| m.role == crate::llm::Role::Assistant && m.has_tool_calls())
+        .count();
     let this_turn: Vec<&Option<bool>> = stale_of.iter().rev().take(turn_batches).collect();
     let mut streak = 0;
     for verdict in &this_turn {
@@ -766,7 +809,11 @@ const ECHO_KEYS: [&str; 7] = ["asked", "query", "for", "limit", "scope", "table"
 /// asked for.
 fn fact_body(content: &str) -> Option<String> {
     let trimmed = content.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("no result") || trimmed.eq_ignore_ascii_case("no results") || trimmed == "null" {
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("no result")
+        || trimmed.eq_ignore_ascii_case("no results")
+        || trimmed == "null"
+    {
         return None;
     }
     let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
@@ -783,7 +830,11 @@ fn fact_body(content: &str) -> Option<String> {
         }
     }
     let answered = match value {
-        Value::Object(map) => Value::Object(map.into_iter().filter(|(k, _)| !ECHO_KEYS.contains(&k.as_str())).collect()),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter(|(k, _)| !ECHO_KEYS.contains(&k.as_str()))
+                .collect(),
+        ),
         other => other,
     };
     (!empty(&answered)).then(|| canonical(&answered))
@@ -849,7 +900,10 @@ fn identical_requests_this_turn(messages: &[ChatMessage], rereadable: bool) -> u
         .iter()
         .enumerate()
         .filter(|(offset, m)| {
-            if m.role != crate::llm::Role::Assistant || m.tool_calls.is_empty() || call_signature(&m.tool_calls) != signature {
+            if m.role != crate::llm::Role::Assistant
+                || m.tool_calls.is_empty()
+                || call_signature(&m.tool_calls) != signature
+            {
                 return false;
             }
             // A request whose every call failed for real, or was refused
@@ -864,12 +918,19 @@ fn identical_requests_this_turn(messages: &[ChatMessage], rereadable: bool) -> u
                     .find(|r| r.tool_call_id.as_deref() == Some(tc.id.as_str()))
                     .and_then(|r| r.content.as_deref())
             };
-            let all_failed = m.tool_calls.iter().all(|tc| result_of(tc).and_then(crate::tool::ToolFailure::parse).is_some_and(|f| f.class != "bounded"));
+            let all_failed = m.tool_calls.iter().all(|tc| {
+                result_of(tc)
+                    .and_then(crate::tool::ToolFailure::parse)
+                    .is_some_and(|f| f.class != "bounded")
+            });
             // A request the run ended before answering — a ceiling fell
             // between the call and its result — is not a result the model
             // has either: the notice in its place says to make the call
             // again, and a resumed run does exactly that.
-            let all_unrecorded = m.tool_calls.iter().all(|tc| result_of(tc) == Some(UNRECORDED_READ_NOTICE));
+            let all_unrecorded = m
+                .tool_calls
+                .iter()
+                .all(|tc| result_of(tc) == Some(UNRECORDED_READ_NOTICE));
             !all_failed && !all_unrecorded
         })
         .count()
@@ -1012,7 +1073,10 @@ fn build_react_agent(
                                     }),
                                 )
                             }
-                            None => (Arc::clone(&model), policy.as_ref().map(|_| Arc::clone(&model))),
+                            None => (
+                                Arc::clone(&model),
+                                policy.as_ref().map(|_| Arc::clone(&model)),
+                            ),
                         },
                         EvidenceMode::Record(journal) => {
                             let parent = invocation_parent(&ctx, AGENT_NODE)?;
@@ -1079,9 +1143,13 @@ fn build_react_agent(
                         }
                         let skills: Vec<crate::context::SkillSectionEntry> =
                             match ctx.config().extra.get(SKILLS_KEY) {
-                                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
-                                    RustyError::Node(format!("run skills are malformed: {error}"))
-                                })?,
+                                Some(value) => {
+                                    serde_json::from_value(value.clone()).map_err(|error| {
+                                        RustyError::Node(format!(
+                                            "run skills are malformed: {error}"
+                                        ))
+                                    })?
+                                }
                                 None => Vec::new(),
                             };
                         let mut assembler =
@@ -1119,7 +1187,12 @@ fn build_react_agent(
                                 .get(COUNTERPART_KEY)
                                 .map(crate::tool::Counterpart::from_value);
                             let mut task = situation_text(now, counterpart.as_ref());
-                            if let Some(blocks) = ctx.config().extra.get(MEMORY_BLOCKS_KEY).and_then(Value::as_str) {
+                            if let Some(blocks) = ctx
+                                .config()
+                                .extra
+                                .get(MEMORY_BLOCKS_KEY)
+                                .and_then(Value::as_str)
+                            {
                                 task.push_str("\n\n");
                                 task.push_str(blocks);
                             }
@@ -1159,18 +1232,26 @@ fn build_react_agent(
                                 String,
                                 crate::tool_select::ToolSelectionOverlay,
                             > = match overlays {
-                                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
-                                    RustyError::Node(format!("run tool overlays are malformed: {error}"))
-                                })?,
+                                Some(value) => {
+                                    serde_json::from_value(value.clone()).map_err(|error| {
+                                        RustyError::Node(format!(
+                                            "run tool overlays are malformed: {error}"
+                                        ))
+                                    })?
+                                }
                                 None => Default::default(),
                             };
                             let outcomes: std::collections::BTreeMap<
                                 String,
                                 crate::tool_select::ToolOutcomeStats,
                             > = match outcomes {
-                                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
-                                    RustyError::Node(format!("run tool outcomes are malformed: {error}"))
-                                })?,
+                                Some(value) => {
+                                    serde_json::from_value(value.clone()).map_err(|error| {
+                                        RustyError::Node(format!(
+                                            "run tool outcomes are malformed: {error}"
+                                        ))
+                                    })?
+                                }
                                 None => Default::default(),
                             };
                             let manifests = crate::tool_select::manifests_for_registry(
@@ -1215,14 +1296,26 @@ fn build_react_agent(
                 // The agent's sampling, outermost: the assembler, the
                 // recorder and the provider client all run inside it — the
                 // client sends it, the journal records it with the call.
-                let model: Arc<dyn ChatModel> = match ctx.config().extra.get(TEMPERATURE_KEY).and_then(Value::as_f64) {
-                    Some(t) => Arc::new(crate::llm::ParamsChatModel::new(model, crate::llm::CallParams { temperature: Some(t) })),
+                let model: Arc<dyn ChatModel> = match ctx
+                    .config()
+                    .extra
+                    .get(TEMPERATURE_KEY)
+                    .and_then(Value::as_f64)
+                {
+                    Some(t) => Arc::new(crate::llm::ParamsChatModel::new(
+                        model,
+                        crate::llm::CallParams {
+                            temperature: Some(t),
+                        },
+                    )),
                     None => model,
                 };
                 // No policy, no compaction: the library's ceiling stands in
                 // for the window it does not know.
                 if unbounded {
-                    let bytes = serde_json::to_vec(&messages).map(|b| b.len() as u64).unwrap_or(0);
+                    let bytes = serde_json::to_vec(&messages)
+                        .map(|b| b.len() as u64)
+                        .unwrap_or(0);
                     let estimated = crate::memory::estimated_tokens(bytes, 0);
                     if estimated > LIBRARY_CONTEXT_CEILING_TOKENS {
                         return Err(RustyError::Budget(format!(
@@ -1262,10 +1355,17 @@ fn build_react_agent(
                 let plan_check = if response.message.has_tool_calls() {
                     None
                 } else {
-                    latest_plan(&messages).filter(|(at, plan)| !plan.open().is_empty() && !plan_checked_since(&messages, *at)).map(|(_, plan)| ChatMessage::system(plan_notice(&plan)))
+                    latest_plan(&messages)
+                        .filter(|(at, plan)| {
+                            !plan.open().is_empty() && !plan_checked_since(&messages, *at)
+                        })
+                        .map(|(_, plan)| ChatMessage::system(plan_notice(&plan)))
                 };
                 if plan_check.is_some() {
-                    tracing::info!(node = AGENT_NODE, "plan check: the answer came with steps open; one more turn");
+                    tracing::info!(
+                        node = AGENT_NODE,
+                        "plan check: the answer came with steps open; one more turn"
+                    );
                 }
                 let appended = if inbox_messages.is_empty() && plan_check.is_none() {
                     serde_json::to_value(&response.message)?
@@ -1284,8 +1384,12 @@ fn build_react_agent(
                 // The summary this step's compaction produced, kept for the
                 // next step (only where the deployment declared the channel).
                 if keeps_summary {
-                    if let Some(stored) = assembler_handle.as_ref().and_then(|a| a.take_stored_summary()) {
-                        output = output.with_update(COMPACTION_CHANNEL, serde_json::to_value(stored)?);
+                    if let Some(stored) = assembler_handle
+                        .as_ref()
+                        .and_then(|a| a.take_stored_summary())
+                    {
+                        output =
+                            output.with_update(COMPACTION_CHANNEL, serde_json::to_value(stored)?);
                     }
                 }
                 Ok(output)
@@ -1321,10 +1425,12 @@ fn build_react_agent(
             // call since — see `identical_requests_this_turn`. The registry
             // is what says which a call is, so the test is made here.
             let all_reads = last.tool_calls.iter().all(|call| {
-                tool_executor
-                    .registry()
-                    .get(&call.name)
-                    .is_some_and(|t| matches!(t.effect(), crate::record::Effect::ReadOnly | crate::record::Effect::Pure))
+                tool_executor.registry().get(&call.name).is_some_and(|t| {
+                    matches!(
+                        t.effect(),
+                        crate::record::Effect::ReadOnly | crate::record::Effect::Pure
+                    )
+                })
             });
             let repeats = identical_requests_this_turn(&messages, all_reads);
             if repeats + 1 >= STUCK_TURN_LIMIT {
@@ -1351,9 +1457,21 @@ fn build_react_agent(
                     .tool_calls
                     .iter()
                     .zip(refusals.iter())
-                    .map(|(call, refusal)| ChatMessage::tool_result(call.id.clone(), format!("ERROR: {}", serde_json::to_string(refusal.as_ref().expect("refused")).unwrap_or_default())))
+                    .map(|(call, refusal)| {
+                        ChatMessage::tool_result(
+                            call.id.clone(),
+                            format!(
+                                "ERROR: {}",
+                                serde_json::to_string(refusal.as_ref().expect("refused"))
+                                    .unwrap_or_default()
+                            ),
+                        )
+                    })
                     .collect();
-                return Ok(NodeOutput::update(MESSAGES_CHANNEL, serde_json::to_value(&refused)?));
+                return Ok(NodeOutput::update(
+                    MESSAGES_CHANNEL,
+                    serde_json::to_value(&refused)?,
+                ));
             }
             // Reads that keep answering nothing new: after the bound the
             // next read is refused with a notice; a read asked for after
@@ -1376,7 +1494,10 @@ fn build_react_agent(
                     .iter()
                     .map(|call| ChatMessage::tool_result(call.id.clone(), NO_NEW_FACT_NOTICE))
                     .collect();
-                return Ok(NodeOutput::update(MESSAGES_CHANNEL, serde_json::to_value(&refused)?));
+                return Ok(NodeOutput::update(
+                    MESSAGES_CHANNEL,
+                    serde_json::to_value(&refused)?,
+                ));
             }
             if repeats >= 1 {
                 record_stuck_turn(&ctx, repeats + 1, crate::repair::RepairOutcome::Repaired);
@@ -1476,7 +1597,10 @@ fn build_react_agent(
                     EvidenceMode::None => ctx.effect_journal().cloned(),
                 };
                 tool_executor = tool_executor.with_run_context(crate::tool::RunContext {
-                    run_id: journal.as_ref().map(|j| j.run_id().to_owned()).unwrap_or_default(),
+                    run_id: journal
+                        .as_ref()
+                        .map(|j| j.run_id().to_owned())
+                        .unwrap_or_default(),
                     thread_id: ctx.thread_id().to_owned(),
                     attribution: ctx.config().extra.get(ATTRIBUTION_KEY).cloned(),
                     execution: ctx.config().extra.get(EXECUTION_KEY).cloned(),
@@ -1511,9 +1635,12 @@ fn build_react_agent(
             // and never asks for an approval it will not use.
             for (call, refusal) in last.tool_calls.iter().zip(refusals.iter()) {
                 if let Some(failure) = refusal {
-                    denied
-                        .entry(call.id.clone())
-                        .or_insert_with(|| format!("ERROR: {}", serde_json::to_string(failure).unwrap_or_default()));
+                    denied.entry(call.id.clone()).or_insert_with(|| {
+                        format!(
+                            "ERROR: {}",
+                            serde_json::to_string(failure).unwrap_or_default()
+                        )
+                    });
                 }
             }
             let needed: Vec<_> = match ctx.approval_gate() {
@@ -1562,7 +1689,12 @@ fn build_react_agent(
         let last = messages.last();
         let needs_tools = last.map(ChatMessage::has_tool_calls).unwrap_or(false);
         // A plan-check notice is the loop's own word: the model answers again.
-        let plan_check = last.is_some_and(|m| m.role == crate::llm::Role::System && m.content.as_deref().is_some_and(|c| c.starts_with(PLAN_NOTICE_PREFIX)));
+        let plan_check = last.is_some_and(|m| {
+            m.role == crate::llm::Role::System
+                && m.content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with(PLAN_NOTICE_PREFIX))
+        });
         Ok(if needs_tools {
             Route::Node(TOOLS_NODE.to_owned())
         } else if plan_check {
@@ -1582,12 +1714,18 @@ mod tests {
 
     #[test]
     fn the_newest_plan_is_read_from_the_plan_calls_and_rendered_with_its_open_steps() {
-        let plan = |args: Value| ChatMessage::assistant_tool_calls(vec![crate::llm::ToolCall::new("p", PLAN_TOOL, args)]);
+        let plan = |args: Value| {
+            ChatMessage::assistant_tool_calls(vec![crate::llm::ToolCall::new("p", PLAN_TOOL, args)])
+        };
         let messages = vec![
             ChatMessage::user("three checks"),
-            plan(serde_json::json!({"steps": [{"text": "count open incidents"}, {"text": "find the newest"}, {"text": "who is assigned"}]})),
+            plan(
+                serde_json::json!({"steps": [{"text": "count open incidents"}, {"text": "find the newest"}, {"text": "who is assigned"}]}),
+            ),
             ChatMessage::tool_result("p", "{}"),
-            plan(serde_json::json!({"steps": [{"text": "count open incidents", "status": "done"}, {"text": "find the newest", "status": "in_progress"}, {"text": "who is assigned", "status": "skipped", "note": "no assignee field"}]})),
+            plan(
+                serde_json::json!({"steps": [{"text": "count open incidents", "status": "done"}, {"text": "find the newest", "status": "in_progress"}, {"text": "who is assigned", "status": "skipped", "note": "no assignee field"}]}),
+            ),
             ChatMessage::tool_result("p", "{}"),
         ];
         let (at, plan) = latest_plan(&messages).expect("a plan");
@@ -1596,8 +1734,14 @@ mod tests {
         assert_eq!(plan.open().len(), 1, "doing is open, skipped is not");
         assert_eq!(plan.steps[1].status, "doing");
         let rendered = plan.render();
-        assert!(rendered.starts_with("Plan — 1 of 3 done, 1 open"), "{rendered}");
-        assert!(rendered.contains("3. [skipped] who is assigned — no assignee field"), "{rendered}");
+        assert!(
+            rendered.starts_with("Plan — 1 of 3 done, 1 open"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("3. [skipped] who is assigned — no assignee field"),
+            "{rendered}"
+        );
         assert!(!plan_checked_since(&messages, at));
         let mut nudged = messages.clone();
         nudged.push(ChatMessage::assistant("Done."));
@@ -1610,7 +1754,9 @@ mod tests {
 
     #[test]
     fn a_call_the_run_ended_before_answering_is_not_a_repeat_when_made_again() {
-        let call = |id: &str| crate::llm::ToolCall::new(id, "desk.count", serde_json::json!({"q": "open"}));
+        let call = |id: &str| {
+            crate::llm::ToolCall::new(id, "desk.count", serde_json::json!({"q": "open"}))
+        };
         // The halted run's call got the unrecorded notice; the resumed run
         // makes the same call: not a repeat — the notice asked for it.
         let messages = vec![
@@ -1630,20 +1776,31 @@ mod tests {
         assert_eq!(identical_requests_this_turn(&answered, true), 1);
     }
 
-
     #[test]
     fn empty_and_re_found_answers_are_nothing_new() {
         // Empty answers, however phrased, answer nothing.
         assert!(fact_body("no result").is_none());
         assert!(fact_body("{\"result\":[]}").is_none());
-        assert!(fact_body("{\"asked\":{\"contains\":\"x\"},\"count\":0,\"found\":false,\"notes\":[]}").is_none());
+        assert!(fact_body(
+            "{\"asked\":{\"contains\":\"x\"},\"count\":0,\"found\":false,\"notes\":[]}"
+        )
+        .is_none());
         // The same notes under two phrasings are one answer.
         let a = fact_body("{\"asked\":{\"contains\":\"catalog\"},\"count\":1,\"found\":true,\"notes\":[{\"text\":\"laptops\"}]}").unwrap();
         let b = fact_body("{\"asked\":{\"key\":\"catalog:laptops\"},\"found\":true,\"count\":1,\"notes\":[{\"text\":\"laptops\"}]}").unwrap();
         assert_eq!(a, b);
-        assert_ne!(a, fact_body("{\"count\":1,\"notes\":[{\"text\":\"monitors\"}]}").unwrap());
+        assert_ne!(
+            a,
+            fact_body("{\"count\":1,\"notes\":[{\"text\":\"monitors\"}]}").unwrap()
+        );
         // Three batches: a real answer, then the same answer re-found, then an empty one.
-        let call = |id: &str| ChatMessage::assistant_tool_calls(vec![ToolCall::new(id, "memory.recall", serde_json::json!({}))]);
+        let call = |id: &str| {
+            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                id,
+                "memory.recall",
+                serde_json::json!({}),
+            )])
+        };
         let messages = vec![
             ChatMessage::user("what laptops do we have"),
             call("c1"),
@@ -1653,14 +1810,24 @@ mod tests {
             call("c3"),
             ChatMessage::tool_result("c3", "{\"asked\":{\"contains\":\"monitors\"},\"count\":0,\"found\":false,\"notes\":[]}"),
         ];
-        assert_eq!(stale_results_in_a_row(&messages), 2, "the re-found and the empty answers are a streak of two");
+        assert_eq!(
+            stale_results_in_a_row(&messages),
+            2,
+            "the re-found and the empty answers are a streak of two"
+        );
     }
 
     #[test]
     fn a_turn_spent_on_nothing_new_is_stuck_however_the_reads_are_spaced() {
         // Empty and re-found answers alternate with one new answer each
         // time, so no three are ever in a row — but six in one turn are.
-        let call = |id: &str| ChatMessage::assistant_tool_calls(vec![ToolCall::new(id, "memory.recall", serde_json::json!({}))]);
+        let call = |id: &str| {
+            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                id,
+                "memory.recall",
+                serde_json::json!({}),
+            )])
+        };
         let mut messages = vec![ChatMessage::user("what laptops do we have")];
         let mut n = 0;
         for i in 0..7 {
@@ -1675,7 +1842,11 @@ mod tests {
             messages.push(ChatMessage::tool_result(&id, content));
         }
         // 4 empty, 3 new, none in a row beyond one: below the bound.
-        assert!(stale_results_in_a_row(&messages) < NO_NEW_FACT_LIMIT, "{}", stale_results_in_a_row(&messages));
+        assert!(
+            stale_results_in_a_row(&messages) < NO_NEW_FACT_LIMIT,
+            "{}",
+            stale_results_in_a_row(&messages)
+        );
         for i in 7..11 {
             n += 1;
             let id = format!("c{n}");
@@ -1688,7 +1859,11 @@ mod tests {
             messages.push(ChatMessage::tool_result(&id, content));
         }
         // 6 empty this turn: stuck, whatever came between.
-        assert!(stale_results_in_a_row(&messages) >= NO_NEW_FACT_LIMIT, "{}", stale_results_in_a_row(&messages));
+        assert!(
+            stale_results_in_a_row(&messages) >= NO_NEW_FACT_LIMIT,
+            "{}",
+            stale_results_in_a_row(&messages)
+        );
         // A new turn starts the count over.
         messages.push(ChatMessage::user("and monitors?"));
         assert_eq!(stale_results_in_a_row(&messages), 0);
@@ -1861,7 +2036,10 @@ mod tests {
     /// under it runs as before.
     #[tokio::test]
     async fn without_a_policy_the_run_stops_at_the_library_ceiling() {
-        let model = Arc::new(ScriptedModel::new(vec![ChatMessage::assistant("done"), ChatMessage::assistant("done")]));
+        let model = Arc::new(ScriptedModel::new(vec![
+            ChatMessage::assistant("done"),
+            ChatMessage::assistant("done"),
+        ]));
         let graph = create_react_agent(model.clone(), registry()).unwrap();
         let huge = "x".repeat((LIBRARY_CONTEXT_CEILING_TOKENS as usize) * 5);
         let state = State::from_value(json!({
@@ -1869,12 +2047,23 @@ mod tests {
         }))
         .unwrap();
         let ctx = NodeContext::new(state, NodeConfig::default());
-        let error = graph.node(AGENT_NODE).unwrap().run(ctx).await.expect_err("the ceiling stops the run");
+        let error = graph
+            .node(AGENT_NODE)
+            .unwrap()
+            .run(ctx)
+            .await
+            .expect_err("the ceiling stops the run");
         match error {
-            RustyError::Budget(words) => assert!(words.contains("library ceiling") && words.contains("ContextPolicy"), "{words}"),
+            RustyError::Budget(words) => assert!(
+                words.contains("library ceiling") && words.contains("ContextPolicy"),
+                "{words}"
+            ),
             other => panic!("not a budget stop: {other:?}"),
         }
-        assert!(model.seen_tool_schemas.lock().unwrap().is_empty(), "the model was never called");
+        assert!(
+            model.seen_tool_schemas.lock().unwrap().is_empty(),
+            "the model was never called"
+        );
 
         let state = State::from_value(json!({
             MESSAGES_CHANNEL: [serde_json::to_value(ChatMessage::user("x".repeat(1_000))).unwrap()]

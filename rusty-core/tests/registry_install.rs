@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rusty_agent_runtime::doctor::{DoctorBlock, InstalledPackage};
-use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::allowlist::{
     AllowlistChecker, MemoryApprovalStore, OrgPolicy, PolicyMode,
 };
+use rusty_agent_runtime::doctor::{DoctorBlock, InstalledPackage};
+use rusty_agent_runtime::error::Result;
 use rusty_agent_runtime::install::{
     scope_grants, BlobStore, CapabilityRegistrar, CatalogAuditLedger, CatalogAuditRecord,
     CatalogScope, EvalRunner, IdempotencyKey, InstallOutcome, InstallRequest, InstallStep,
@@ -179,7 +179,6 @@ fn make_index_with_entry(privkey: &str, pubkey: &str) -> RegistryIndex {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
 
 fn open_checker() -> AllowlistChecker {
     AllowlistChecker::new(OrgPolicy::new(PolicyMode::Open, vec![]))

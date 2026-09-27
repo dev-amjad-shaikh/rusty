@@ -1367,8 +1367,8 @@ mod read_back_tests {
     }
 
     #[test]
-    fn nothing_is_proposed_without_a_filtering_read_or_a_natural_key_and_declared_writes_are_left_alone()
-     {
+    fn nothing_is_proposed_without_a_filtering_read_or_a_natural_key_and_declared_writes_are_left_alone(
+    ) {
         let no_filter = manifest(vec![
             op(
                 "list",

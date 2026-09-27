@@ -12,13 +12,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::context::ContextPolicy;
 use rusty_agent_runtime::prelude::*;
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 struct AnswerModel;

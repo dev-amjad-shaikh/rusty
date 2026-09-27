@@ -545,7 +545,9 @@ fn path_matches(pattern: &str, path: &str) -> bool {
     let is_catch_all = |segment: &str| inner(segment).starts_with('*');
     let is_param = |segment: &str| {
         let body = inner(segment);
-        segment.starts_with(':') || (segment.starts_with('{') && segment.ends_with('}')) || body.starts_with('*')
+        segment.starts_with(':')
+            || (segment.starts_with('{') && segment.ends_with('}'))
+            || body.starts_with('*')
     };
 
     let declared: Vec<&str> = pattern.split('/').collect();
@@ -578,7 +580,10 @@ mod path_matching_tests {
     #[test]
     fn a_parameter_matches_one_non_empty_segment() {
         assert!(path_matches("/threads/:id/state", "/threads/abc-123/state"));
-        assert!(path_matches("/threads/{id}/state", "/threads/abc-123/state"));
+        assert!(path_matches(
+            "/threads/{id}/state",
+            "/threads/abc-123/state"
+        ));
         // An empty id is not an id.
         assert!(!path_matches("/threads/:id/state", "/threads//state"));
         // A parameter covers one segment, never several.
@@ -588,11 +593,23 @@ mod path_matching_tests {
 
     #[test]
     fn a_catch_all_covers_the_rest_of_the_path() {
-        assert!(path_matches("/skills/{name}/files/{*path}", "/skills/a/files/guide.md"));
-        assert!(path_matches("/skills/{name}/files/{*path}", "/skills/a/files/references/guide.md"));
+        assert!(path_matches(
+            "/skills/{name}/files/{*path}",
+            "/skills/a/files/guide.md"
+        ));
+        assert!(path_matches(
+            "/skills/{name}/files/{*path}",
+            "/skills/a/files/references/guide.md"
+        ));
         // Nothing after the prefix is not a file.
-        assert!(!path_matches("/skills/{name}/files/{*path}", "/skills/a/files/"));
-        assert!(!path_matches("/skills/{name}/files/{*path}", "/skills/a/files"));
+        assert!(!path_matches(
+            "/skills/{name}/files/{*path}",
+            "/skills/a/files/"
+        ));
+        assert!(!path_matches(
+            "/skills/{name}/files/{*path}",
+            "/skills/a/files"
+        ));
     }
 
     #[test]
@@ -605,7 +622,11 @@ mod path_matching_tests {
     fn a_literal_declaration_wins_over_a_parameterised_one() {
         let mut table = ScopeTable::new();
         table.declare("GET", "/runs/:run_id", Scope::parse("runs:read").unwrap());
-        table.declare("GET", "/runs/summary", Scope::parse("runs:summary").unwrap());
+        table.declare(
+            "GET",
+            "/runs/summary",
+            Scope::parse("runs:summary").unwrap(),
+        );
         assert_eq!(
             table.required_scope("GET", "/runs/summary"),
             Some(&Scope::parse("runs:summary").unwrap()),

@@ -154,8 +154,12 @@ pub(crate) enum ActivateVersionOutcome {
 
 #[derive(Debug, Clone)]
 pub(crate) enum DeclineVersionOutcome {
-    Declined { record: AssistantRecord },
-    Already { record: AssistantRecord },
+    Declined {
+        record: AssistantRecord,
+    },
+    Already {
+        record: AssistantRecord,
+    },
     AssistantNotFound,
     VersionNotFound,
     /// The version that runs cannot be declined; activate another first.
@@ -249,7 +253,10 @@ impl AssistantRecord {
 
     /// The decline on a version, if a person said no to it.
     pub(crate) fn decline_of(&self, version_id: &str) -> Option<VersionDecline> {
-        self.declined.iter().find(|d| d.version_id == version_id).cloned()
+        self.declined
+            .iter()
+            .find(|d| d.version_id == version_id)
+            .cloned()
     }
 
     pub(crate) fn ensure_version_history(&mut self) {
@@ -403,8 +410,13 @@ impl AssistantRecord {
                     parent_version_id: version.parent_version_id,
                     graph: version.graph,
                     created_at: version.created_at,
-            proposed_by: version.metadata.get("proposed_by").and_then(|p| p.get("name").or(Some(p))).and_then(|v| v.as_str()).map(str::to_owned),
-        })
+                    proposed_by: version
+                        .metadata
+                        .get("proposed_by")
+                        .and_then(|p| p.get("name").or(Some(p)))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
+                })
                 .collect()
         } else {
             self.versions
@@ -416,8 +428,13 @@ impl AssistantRecord {
                     parent_version_id: version.parent_version_id.clone(),
                     graph: version.graph.clone(),
                     created_at: version.created_at,
-            proposed_by: version.metadata.get("proposed_by").and_then(|p| p.get("name").or(Some(p))).and_then(|v| v.as_str()).map(str::to_owned),
-        })
+                    proposed_by: version
+                        .metadata
+                        .get("proposed_by")
+                        .and_then(|p| p.get("name").or(Some(p)))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
+                })
                 .collect()
         };
         summaries.sort_by(|left, right| {

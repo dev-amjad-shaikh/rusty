@@ -17,11 +17,11 @@ use rusty_eval::{
     AssertionResult, JudgeModel, JudgeRequest, ModelJudge, RunEvidence, RunStatus as EvidenceStatus,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::error::ApiError;
 use crate::evaluations::PublishedEvalCase;
-use crate::routes::{AppState, internal_err};
+use crate::routes::{internal_err, AppState};
 use crate::runs::{self, MultitaskStrategy, RunPayload};
 use crate::server_store::ServerStore;
 use crate::threads::ThreadRecord;

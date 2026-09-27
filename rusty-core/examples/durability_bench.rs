@@ -41,7 +41,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use rusty_agent_runtime::prelude::*;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
 // Scripted model: fixed-size responses, byte-exact accounting.
@@ -283,7 +283,7 @@ fn checkpoint_overhead(chain_nodes: usize, reps: usize, root: &std::path::Path) 
         let _ = std::fs::create_dir_all(root.join(format!("overhead-{rep}")));
         plain_us.push(time(rep, false));
         mem_us.push(time(rep, false)); // placeholder replaced below
-        // In-memory checkpointer run.
+                                       // In-memory checkpointer run.
         let executor = Executor::with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
         let start = Instant::now();
         futures_executor(

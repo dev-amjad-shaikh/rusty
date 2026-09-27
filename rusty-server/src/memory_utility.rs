@@ -14,14 +14,14 @@
 
 use std::sync::Arc;
 
-use axum::{Extension, Json, extract::State};
+use axum::{extract::State, Extension, Json};
 use chrono::Utc;
 use rusty_agent_runtime::journal::JournalSnapshot;
 use rusty_agent_runtime::memory_tiers::{
-    RunOutcome, UtilityEntry, UtilityIndex, UtilityRun, build_utility_index,
+    build_utility_index, RunOutcome, UtilityEntry, UtilityIndex, UtilityRun,
 };
 use rusty_agent_runtime::record::{EventStatus, PayloadRef, RunEventKind};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;
@@ -610,7 +610,7 @@ pub(crate) async fn sweep(
     state: &AppState,
     index: &mut UtilityIndex,
 ) -> Result<SweepReport, String> {
-    use rusty_agent_runtime::memory::{MemoryForgetTombstone, ProvenanceAuthor, plan_forget};
+    use rusty_agent_runtime::memory::{plan_forget, MemoryForgetTombstone, ProvenanceAuthor};
     use rusty_agent_runtime::memory_tiers::forgetting_candidates;
     let tenant = TenantContext::new(crate::auth::DEFAULT_TENANT.to_owned(), Vec::new());
     let now = Utc::now();

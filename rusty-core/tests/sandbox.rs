@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::sandbox::{
@@ -251,14 +251,12 @@ async fn tool_executor_routes_sandboxed_with_full_backend() {
         .execute_one(&ToolCall::new("c1", "execute_required", json!({})))
         .await
         .unwrap();
-    assert!(
-        result
-            .get("stdout")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains("executed")
-    );
+    assert!(result
+        .get("stdout")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("executed"));
 }
 
 #[tokio::test]
@@ -369,7 +367,8 @@ impl SandboxExecutor for CountingBackend {
         Ok(())
     }
     async fn execute(&self, command: &str, _args: &[String]) -> Result<SandboxResult> {
-        self.executed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.executed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(SandboxResult {
             stdout: format!("{command} ran"),
             stderr: String::new(),
@@ -422,7 +421,10 @@ async fn a_sandboxed_call_is_admitted_before_it_is_placed() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let executed = Arc::new(AtomicUsize::new(0));
-    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend { id: "counting".into(), executed: executed.clone() });
+    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend {
+        id: "counting".into(),
+        executed: executed.clone(),
+    });
     let call = ToolCall::new("c1", "deploy", json!({"build": "1.4.2"}));
 
     // Refused: an irreversible effect with no approval never reaches the
@@ -434,13 +436,24 @@ async fn a_sandboxed_call_is_admitted_before_it_is_placed() {
         .with_effect_admission(EffectAdmissionContext::new("run-r04"));
     let err = denied.execute_one(&call).await.unwrap_err().to_string();
     assert!(err.contains("effect admission denied"), "got: {err}");
-    assert_eq!(executed.load(Ordering::SeqCst), 0, "a refused sandboxed call produced no execution");
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        0,
+        "a refused sandboxed call produced no execution"
+    );
 
     // Admitted: the exact approval for this occurrence lets it through to
     // the backend, once.
     let mut registry = ToolRegistry::new();
     registry.register(DeployTool);
-    let approval = ApprovalToken::approve(registry.get("deploy").unwrap().effect_request(&call).effect_id("run-r04"), "ops:amjad");
+    let approval = ApprovalToken::approve(
+        registry
+            .get("deploy")
+            .unwrap()
+            .effect_request(&call)
+            .effect_id("run-r04"),
+        "ops:amjad",
+    );
     let allowed = ToolExecutor::new(registry)
         .with_sandbox(backend.clone())
         .with_effect_admission(EffectAdmissionContext::new("run-r04").with_approvals([approval]));
@@ -471,7 +484,10 @@ async fn a_shadowed_sandboxed_call_is_served_from_the_record_and_never_placed() 
     use std::sync::Mutex;
 
     let executed = Arc::new(AtomicUsize::new(0));
-    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend { id: "counting".into(), executed: executed.clone() });
+    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend {
+        id: "counting".into(),
+        executed: executed.clone(),
+    });
     let refusals: Arc<Mutex<Vec<ShadowRefusal>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = {
         let refusals = refusals.clone();
@@ -484,10 +500,23 @@ async fn a_shadowed_sandboxed_call_is_served_from_the_record_and_never_placed() 
     registry.register(DeployTool);
     let served = ToolExecutor::new(registry)
         .with_sandbox(backend.clone())
-        .with_effect_admission(EffectAdmissionContext::shadow("run-shadow", Arc::new(RecordedDeploy(Some(json!({"stdout": "deploy ran (recorded)"})))), sink.clone()));
-    let result = served.execute_one(&call).await.expect("served from the record");
+        .with_effect_admission(EffectAdmissionContext::shadow(
+            "run-shadow",
+            Arc::new(RecordedDeploy(Some(
+                json!({"stdout": "deploy ran (recorded)"}),
+            ))),
+            sink.clone(),
+        ));
+    let result = served
+        .execute_one(&call)
+        .await
+        .expect("served from the record");
     assert_eq!(result["stdout"], "deploy ran (recorded)");
-    assert_eq!(executed.load(Ordering::SeqCst), 0, "a shadowed sandboxed call produced no execution");
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        0,
+        "a shadowed sandboxed call produced no execution"
+    );
     assert_eq!(refusals.lock().unwrap().len(), 1);
     assert!(refusals.lock().unwrap()[0].served);
 
@@ -496,7 +525,11 @@ async fn a_shadowed_sandboxed_call_is_served_from_the_record_and_never_placed() 
     registry.register(DeployTool);
     let diverged = ToolExecutor::new(registry)
         .with_sandbox(backend.clone())
-        .with_effect_admission(EffectAdmissionContext::shadow("run-shadow", Arc::new(RecordedDeploy(None)), sink));
+        .with_effect_admission(EffectAdmissionContext::shadow(
+            "run-shadow",
+            Arc::new(RecordedDeploy(None)),
+            sink,
+        ));
     let err = diverged.execute_one(&call).await.unwrap_err().to_string();
     assert!(err.contains("effect admission denied"), "got: {err}");
     assert_eq!(executed.load(Ordering::SeqCst), 0);
@@ -512,28 +545,62 @@ async fn a_sandboxed_call_is_journaled_like_an_in_process_one() {
     use rusty_agent_runtime::record::{Effect, RunEventKind};
     use std::sync::atomic::AtomicUsize;
 
-    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend { id: "counting".into(), executed: Arc::new(AtomicUsize::new(0)) });
+    let backend: Arc<dyn SandboxExecutor> = Arc::new(CountingBackend {
+        id: "counting".into(),
+        executed: Arc::new(AtomicUsize::new(0)),
+    });
     let journal = Journal::new("run-r04-journal", "thread-r04", Clock::System);
     let call = ToolCall::new("c1", "deploy", json!({"build": "1.4.2"}));
     let mut registry = ToolRegistry::new();
     registry.register(DeployTool);
-    let approval = ApprovalToken::approve(registry.get("deploy").unwrap().effect_request(&call).effect_id("run-r04-journal"), "ops:amjad");
+    let approval = ApprovalToken::approve(
+        registry
+            .get("deploy")
+            .unwrap()
+            .effect_request(&call)
+            .effect_id("run-r04-journal"),
+        "ops:amjad",
+    );
     let executor = ToolExecutor::new(registry)
         .with_sandbox(backend)
         .with_guard_journal(journal.clone(), "node-input:7")
-        .with_effect_admission(EffectAdmissionContext::new("run-r04-journal").with_approvals([approval]));
+        .with_effect_admission(
+            EffectAdmissionContext::new("run-r04-journal").with_approvals([approval]),
+        );
 
-    executor.execute_one(&call).await.expect("admitted and placed");
+    executor
+        .execute_one(&call)
+        .await
+        .expect("admitted and placed");
 
     let events = journal.events();
-    let recorded: Vec<_> = events.iter().filter(|e| e.kind == RunEventKind::ToolCall).collect();
-    assert_eq!(recorded.len(), 1, "one ToolCall event for the sandboxed call: {events:?}");
+    let recorded: Vec<_> = events
+        .iter()
+        .filter(|e| e.kind == RunEventKind::ToolCall)
+        .collect();
+    assert_eq!(
+        recorded.len(),
+        1,
+        "one ToolCall event for the sandboxed call: {events:?}"
+    );
     let event = recorded[0];
-    assert_eq!(event.effect, Effect::NonIdempotent, "the tool's declared effect, not the backend's");
+    assert_eq!(
+        event.effect,
+        Effect::NonIdempotent,
+        "the tool's declared effect, not the backend's"
+    );
     assert_eq!(event.parent.as_deref(), Some("node-input:7"));
-    let input = event.input.as_ref().and_then(|i| journal.resolve(i)).expect("the input payload");
+    let input = event
+        .input
+        .as_ref()
+        .and_then(|i| journal.resolve(i))
+        .expect("the input payload");
     assert_eq!(input["tool"], "deploy");
     assert_eq!(input["arguments"]["build"], "1.4.2");
-    let output = event.output.as_ref().and_then(|o| journal.resolve(o)).expect("the output payload");
+    let output = event
+        .output
+        .as_ref()
+        .and_then(|o| journal.resolve(o))
+        .expect("the output payload");
     assert_eq!(output["stdout"], "deploy ran");
 }

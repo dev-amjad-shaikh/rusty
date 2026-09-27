@@ -48,13 +48,13 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use rusty_agent_runtime::durable::{
-    ErrorClass, ResolvedRetryParameters, RetryDecision, classify_retry_with_policy,
+    classify_retry_with_policy, ErrorClass, ResolvedRetryParameters, RetryDecision,
 };
 use rusty_agent_runtime::llm::Usage;
 use rusty_agent_runtime::record::ExecutorPolicy;
 use rusty_agent_runtime::record::{Effect, EffectReceipt};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The pool every task lands in when the enqueue payload names none.
 pub(crate) const DEFAULT_POOL: &str = "default";

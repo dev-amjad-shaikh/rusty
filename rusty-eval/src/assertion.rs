@@ -178,8 +178,16 @@ impl Assertion {
                     )
                 }),
             },
-            Assertion::WorldWrite { table, fields, like } => {
-                let want = ExpectedWorldWrite { table: table.clone(), fields: fields.clone(), like: like.clone() };
+            Assertion::WorldWrite {
+                table,
+                fields,
+                like,
+            } => {
+                let want = ExpectedWorldWrite {
+                    table: table.clone(),
+                    fields: fields.clone(),
+                    like: like.clone(),
+                };
                 let in_table: Vec<&Value> = evidence
                     .world_writes
                     .iter()
@@ -219,7 +227,11 @@ impl Assertion {
                     detail: (!offending.is_empty()).then(|| {
                         let mut names = offending.clone();
                         names.dedup();
-                        format!("the run wrote {} row(s) in {}", offending.len(), names.join(", "))
+                        format!(
+                            "the run wrote {} row(s) in {}",
+                            offending.len(),
+                            names.join(", ")
+                        )
                     }),
                 }
             }
@@ -326,60 +338,139 @@ mod world_write_tests {
             latency_ms: 0,
             cost_usd: 0.0,
             total_tokens: 0,
-            world_writes: writes.into_iter().map(|(table, row)| WorldWrite { table: table.to_owned(), row }).collect(),
+            world_writes: writes
+                .into_iter()
+                .map(|(table, row)| WorldWrite {
+                    table: table.to_owned(),
+                    row,
+                })
+                .collect(),
         }
     }
 
     fn fields(pairs: &[(&str, Value)]) -> serde_json::Map<String, Value> {
-        pairs.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
     }
 
     #[test]
     fn a_row_the_run_wrote_with_the_fields_holds_and_a_row_without_them_says_which_fields() {
-        let wrote = evidence(vec![("tickets", json!({"id": 2, "room": "kitchen", "_written_by": {"run_id": "r1"}}))]);
-        let want = Assertion::WorldWrite { table: "tickets".into(), fields: fields(&[("/room", json!("kitchen"))]), like: Default::default() };
+        let wrote = evidence(vec![(
+            "tickets",
+            json!({"id": 2, "room": "kitchen", "_written_by": {"run_id": "r1"}}),
+        )]);
+        let want = Assertion::WorldWrite {
+            table: "tickets".into(),
+            fields: fields(&[("/room", json!("kitchen"))]),
+            like: Default::default(),
+        };
         let ok = want.evaluate(&wrote);
         assert!(ok.passed, "{ok:?}");
         assert_eq!(ok.assertion, "world_write[tickets]");
-        let wrong = Assertion::WorldWrite { table: "tickets".into(), fields: fields(&[("/room", json!("lobby"))]), like: Default::default() };
+        let wrong = Assertion::WorldWrite {
+            table: "tickets".into(),
+            fields: fields(&[("/room", json!("lobby"))]),
+            like: Default::default(),
+        };
         let no = wrong.evaluate(&wrote);
         assert!(!no.passed);
-        assert_eq!(no.detail.as_deref(), Some("the run wrote 1 row(s) in `tickets`, none with room = \"lobby\""));
-        let other = Assertion::WorldWrite { table: "me".into(), fields: fields(&[]), like: Default::default() };
-        assert_eq!(other.evaluate(&wrote).detail.as_deref(), Some("the run wrote nothing in `me`"));
+        assert_eq!(
+            no.detail.as_deref(),
+            Some("the run wrote 1 row(s) in `tickets`, none with room = \"lobby\"")
+        );
+        let other = Assertion::WorldWrite {
+            table: "me".into(),
+            fields: fields(&[]),
+            like: Default::default(),
+        };
+        assert_eq!(
+            other.evaluate(&wrote).detail.as_deref(),
+            Some("the run wrote nothing in `me`")
+        );
     }
 
     #[test]
     fn a_field_the_agent_words_for_itself_is_matched_by_what_it_contains_case_ignored() {
-        let wrote = evidence(vec![("tickets", json!({"id": 3, "room": "1st Floor vending machine", "number": 3}))]);
-        let like = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect::<std::collections::BTreeMap<String, String>>();
-        let loose = Assertion::WorldWrite { table: "tickets".into(), fields: Default::default(), like: like(&[("/room", "floor"), ("/number", "3")]) };
-        assert!(loose.evaluate(&wrote).passed, "{:?}", loose.evaluate(&wrote));
-        let miss = Assertion::WorldWrite { table: "tickets".into(), fields: fields(&[("/id", json!(3))]), like: like(&[("/room", "lobby")]) };
+        let wrote = evidence(vec![(
+            "tickets",
+            json!({"id": 3, "room": "1st Floor vending machine", "number": 3}),
+        )]);
+        let like = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect::<std::collections::BTreeMap<String, String>>()
+        };
+        let loose = Assertion::WorldWrite {
+            table: "tickets".into(),
+            fields: Default::default(),
+            like: like(&[("/room", "floor"), ("/number", "3")]),
+        };
+        assert!(
+            loose.evaluate(&wrote).passed,
+            "{:?}",
+            loose.evaluate(&wrote)
+        );
+        let miss = Assertion::WorldWrite {
+            table: "tickets".into(),
+            fields: fields(&[("/id", json!(3))]),
+            like: like(&[("/room", "lobby")]),
+        };
         let no = miss.evaluate(&wrote);
         assert!(!no.passed);
-        assert_eq!(no.detail.as_deref(), Some("the run wrote 1 row(s) in `tickets`, none with id = 3, room ~ lobby"));
+        assert_eq!(
+            no.detail.as_deref(),
+            Some("the run wrote 1 row(s) in `tickets`, none with id = 3, room ~ lobby")
+        );
     }
 
     #[test]
     fn outside_a_world_or_without_a_write_the_expectation_fails_and_says_so() {
         let nothing = evidence(Vec::new());
-        let want = Assertion::WorldWrite { table: "tickets".into(), fields: fields(&[]), like: Default::default() };
+        let want = Assertion::WorldWrite {
+            table: "tickets".into(),
+            fields: fields(&[]),
+            like: Default::default(),
+        };
         let no = want.evaluate(&nothing);
         assert!(!no.passed);
-        assert!(no.detail.as_deref().unwrap().starts_with("the run left no row in the world"), "{no:?}");
+        assert!(
+            no.detail
+                .as_deref()
+                .unwrap()
+                .starts_with("the run left no row in the world"),
+            "{no:?}"
+        );
     }
 
     #[test]
     fn a_table_that_must_stay_untouched_fails_when_the_run_wrote_there() {
-        let wrote = evidence(vec![("tickets", json!({"id": 2})), ("tickets", json!({"id": 3}))]);
-        let quiet = Assertion::NoWorldWrite { tables: vec!["me".into()] };
+        let wrote = evidence(vec![
+            ("tickets", json!({"id": 2})),
+            ("tickets", json!({"id": 3})),
+        ]);
+        let quiet = Assertion::NoWorldWrite {
+            tables: vec!["me".into()],
+        };
         assert!(quiet.evaluate(&wrote).passed);
-        let loud = Assertion::NoWorldWrite { tables: vec!["tickets".into(), "me".into()] };
+        let loud = Assertion::NoWorldWrite {
+            tables: vec!["tickets".into(), "me".into()],
+        };
         let no = loud.evaluate(&wrote);
         assert!(!no.passed);
-        assert_eq!(no.detail.as_deref(), Some("the run wrote 2 row(s) in tickets"));
-        assert!(Assertion::NoWorldWrite { tables: vec!["tickets".into()] }.evaluate(&evidence(Vec::new())).passed);
+        assert_eq!(
+            no.detail.as_deref(),
+            Some("the run wrote 2 row(s) in tickets")
+        );
+        assert!(
+            Assertion::NoWorldWrite {
+                tables: vec!["tickets".into()]
+            }
+            .evaluate(&evidence(Vec::new()))
+            .passed
+        );
     }
 
     #[test]

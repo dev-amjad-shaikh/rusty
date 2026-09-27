@@ -12,8 +12,8 @@ use rusty_agent_runtime::error::Result as RuntimeResult;
 use rusty_agent_runtime::journal::Journal;
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::react::{create_react_agent_with_recording, MESSAGES_CHANNEL};
-use rusty_agent_runtime::state::{Reducer, StateSpec};
 use rusty_agent_runtime::record::Effect;
+use rusty_agent_runtime::state::{Reducer, StateSpec};
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 
 use rusty_eval::{

@@ -384,11 +384,15 @@ pub(crate) async fn persist_dataset(
             case_count: cases.len(),
             digest: dataset_digest(&cases)?,
             agent_id: {
-                let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+                let mut counts: std::collections::BTreeMap<&str, usize> =
+                    std::collections::BTreeMap::new();
                 for item in &cases {
                     *counts.entry(item.source.agent_id.as_str()).or_default() += 1;
                 }
-                counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id.to_owned())
+                counts
+                    .into_iter()
+                    .max_by_key(|(_, n)| *n)
+                    .map(|(id, _)| id.to_owned())
             },
         },
         cases,
@@ -1560,7 +1564,13 @@ pub(crate) async fn sweep_all(
     }
     let mut started = Vec::new();
     for dataset in newest {
-        let cases = load_dataset_cases(&state.server_store, tenant.tenant(), &dataset.name, &dataset.version).await?;
+        let cases = load_dataset_cases(
+            &state.server_store,
+            tenant.tenant(),
+            &dataset.name,
+            &dataset.version,
+        )
+        .await?;
         let mut entry = serde_json::json!({"name": dataset.name, "version": dataset.version, "cases": cases.len()});
         let Some(agent_id) = cases.first().map(|c| c.source.agent_id.clone()) else {
             entry["skipped"] = serde_json::json!("no case names the agent it was recorded from");
@@ -1605,7 +1615,9 @@ pub(crate) async fn sweep_all(
 async fn sweep_recipients(state: &crate::routes::AppState) -> Vec<Value> {
     let users = state.users.list().await;
     if users.is_empty() {
-        return vec![serde_json::json!({"principal_id": "dev", "name": "Developer (open mode)", "kind": "user"})];
+        return vec![
+            serde_json::json!({"principal_id": "dev", "name": "Developer (open mode)", "kind": "user"}),
+        ];
     }
     users
         .into_iter()
@@ -1620,7 +1632,12 @@ async fn sweep_recipients(state: &crate::routes::AppState) -> Vec<Value> {
 /// whether it passed last time (a regression) — once per suite per
 /// sweep, in the Inbox. A suite that passed says nothing: the morning
 /// Inbox holds what needs a person, not a report.
-pub(crate) fn spawn_sweep_report(state: Arc<crate::routes::AppState>, tenant: String, started: Vec<Value>, nightly: bool) {
+pub(crate) fn spawn_sweep_report(
+    state: Arc<crate::routes::AppState>,
+    tenant: String,
+    started: Vec<Value>,
+    nightly: bool,
+) {
     tokio::spawn(async move {
         let recipients = sweep_recipients(&state).await;
         if recipients.is_empty() {
@@ -1629,52 +1646,111 @@ pub(crate) fn spawn_sweep_report(state: Arc<crate::routes::AppState>, tenant: St
         for entry in started {
             let (Some(name), Some(version), Some(evaluation_id)) = (
                 entry.get("name").and_then(Value::as_str).map(str::to_owned),
-                entry.get("version").and_then(Value::as_str).map(str::to_owned),
-                entry.get("evaluation_id").and_then(Value::as_str).map(str::to_owned),
-            ) else { continue };
-            let agent = entry.get("assistant").and_then(Value::as_str).unwrap_or("an agent").to_owned();
+                entry
+                    .get("version")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                entry
+                    .get("evaluation_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            ) else {
+                continue;
+            };
+            let agent = entry
+                .get("assistant")
+                .and_then(Value::as_str)
+                .unwrap_or("an agent")
+                .to_owned();
             // Wait for it — a suite is a handful of real runs — but not forever.
             let mut latest = None;
             for _ in 0..900 {
-                let Ok(list) = crate::dataset_runs::list(&state, &tenant, &name, &version).await else { break };
+                let Ok(list) = crate::dataset_runs::list(&state, &tenant, &name, &version).await
+                else {
+                    break;
+                };
                 if let Some(e) = list.iter().find(|e| e.evaluation_id == evaluation_id) {
                     if e.status != "running" {
                         let mut sorted = list.clone();
                         sorted.sort_by_key(|a| a.started_at);
                         let at = sorted.iter().position(|x| x.evaluation_id == evaluation_id);
-                        let previous = at.and_then(|i| i.checked_sub(1)).and_then(|i| sorted.get(i).cloned());
+                        let previous = at
+                            .and_then(|i| i.checked_sub(1))
+                            .and_then(|i| sorted.get(i).cloned());
                         latest = Some((e.clone(), previous));
                         break;
                     }
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            let Some((evaluation, previous)) = latest else { continue };
+            let Some((evaluation, previous)) = latest else {
+                continue;
+            };
             if evaluation.status == "done" && evaluation.passed == evaluation.total {
                 continue;
             }
-            let regressed = previous.as_ref().is_some_and(|p| p.status == "done" && p.total > 0 && p.passed == p.total);
-            let reasons: Vec<String> = crate::dataset_runs::failures_of(&evaluation).iter().take(3).filter_map(|r| r.as_str().map(str::to_owned).or_else(|| r.get("reason").and_then(Value::as_str).map(str::to_owned)).or_else(|| Some(r.to_string()))).collect();
+            let regressed = previous
+                .as_ref()
+                .is_some_and(|p| p.status == "done" && p.total > 0 && p.passed == p.total);
+            let reasons: Vec<String> = crate::dataset_runs::failures_of(&evaluation)
+                .iter()
+                .take(3)
+                .filter_map(|r| {
+                    r.as_str()
+                        .map(str::to_owned)
+                        .or_else(|| r.get("reason").and_then(Value::as_str).map(str::to_owned))
+                        .or_else(|| Some(r.to_string()))
+                })
+                .collect();
             let sweep = if nightly { "Nightly sweep" } else { "Sweep" };
             let title = if evaluation.status != "done" {
                 format!("{sweep}: {agent}'s suite {name} could not run")
             } else if regressed {
-                format!("{sweep}: {agent}'s suite {name} regressed — {} of {} passed", evaluation.passed, evaluation.total)
+                format!(
+                    "{sweep}: {agent}'s suite {name} regressed — {} of {} passed",
+                    evaluation.passed, evaluation.total
+                )
             } else {
-                format!("{sweep}: {agent}'s suite {name} — {} of {} passed", evaluation.passed, evaluation.total)
+                format!(
+                    "{sweep}: {agent}'s suite {name} — {} of {} passed",
+                    evaluation.passed, evaluation.total
+                )
             };
             let text = if evaluation.status != "done" {
-                evaluation.error.clone().unwrap_or_else(|| "the evaluation ended without a verdict".to_owned())
+                evaluation
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "the evaluation ended without a verdict".to_owned())
             } else {
-                let mut t = if regressed { "It passed in full last time. ".to_owned() } else { String::new() };
-                if !reasons.is_empty() { t.push_str(&reasons.join(" · ")); }
+                let mut t = if regressed {
+                    "It passed in full last time. ".to_owned()
+                } else {
+                    String::new()
+                };
+                if !reasons.is_empty() {
+                    t.push_str(&reasons.join(" · "));
+                }
                 t.push_str(" — open the suite under Evals to read each case.");
                 t
             };
             let about = serde_json::json!({"kind": "sweep", "dataset": name, "version": version, "evaluation_id": evaluation_id, "assistant_id": evaluation.assistant_id, "passed": evaluation.passed, "total": evaluation.total, "regressed": regressed, "state": if evaluation.status != "done" { "failed" } else if regressed { "regressed" } else { "failing" }});
             for to in &recipients {
-                let key = format!("sweep:{name}:{evaluation_id}:{}", to.get("principal_id").and_then(Value::as_str).unwrap_or("?"));
-                crate::notices::tell_in(&state.server_store, &tenant, to, &key, about.clone(), &title, &text).await;
+                let key = format!(
+                    "sweep:{name}:{evaluation_id}:{}",
+                    to.get("principal_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("?")
+                );
+                crate::notices::tell_in(
+                    &state.server_store,
+                    &tenant,
+                    to,
+                    &key,
+                    about.clone(),
+                    &title,
+                    &text,
+                )
+                .await;
             }
             tracing::info!(dataset = %name, passed = evaluation.passed, total = evaluation.total, regressed, "sweep: a suite did not pass in full; the administrators are told");
         }
@@ -1683,7 +1759,11 @@ pub(crate) fn spawn_sweep_report(state: Arc<crate::routes::AppState>, tenant: St
 
 /// How long until the next `hour:minute` UTC from `now` — later today, or
 /// tomorrow when that moment has passed.
-pub(crate) fn until_next(now: chrono::DateTime<chrono::Utc>, hour: u32, minute: u32) -> std::time::Duration {
+pub(crate) fn until_next(
+    now: chrono::DateTime<chrono::Utc>,
+    hour: u32,
+    minute: u32,
+) -> std::time::Duration {
     use chrono::{Duration as ChronoDuration, Timelike};
     let today = now
         .with_hour(hour)
@@ -1691,24 +1771,50 @@ pub(crate) fn until_next(now: chrono::DateTime<chrono::Utc>, hour: u32, minute: 
         .and_then(|t| t.with_second(0))
         .and_then(|t| t.with_nanosecond(0))
         .unwrap_or(now);
-    let next = if today > now { today } else { today + ChronoDuration::days(1) };
-    (next - now).to_std().unwrap_or(std::time::Duration::from_secs(60))
+    let next = if today > now {
+        today
+    } else {
+        today + ChronoDuration::days(1)
+    };
+    (next - now)
+        .to_std()
+        .unwrap_or(std::time::Duration::from_secs(60))
 }
 
 /// The nightly sweep: when the server is configured with a time, every
 /// suite runs at it, every day, attributed to the schedule. Nobody presses
 /// anything; Evals shows the verdicts in the morning.
 pub(crate) fn spawn_sweeper(state: Arc<crate::routes::AppState>) {
-    let Some((hour, minute)) = state.config.sweep_at else { return };
+    let Some((hour, minute)) = state.config.sweep_at else {
+        return;
+    };
     tokio::spawn(async move {
         loop {
             let wait = until_next(chrono::Utc::now(), hour, minute);
             tokio::time::sleep(wait).await;
-            let tenant = crate::auth::TenantContext::new(crate::auth::DEFAULT_TENANT.to_owned(), Vec::new());
-            match sweep_all(&state, &tenant, serde_json::json!({"kind": "sweep", "by": "schedule"})).await {
+            let tenant =
+                crate::auth::TenantContext::new(crate::auth::DEFAULT_TENANT.to_owned(), Vec::new());
+            match sweep_all(
+                &state,
+                &tenant,
+                serde_json::json!({"kind": "sweep", "by": "schedule"}),
+            )
+            .await
+            {
                 Ok(started) => {
-                    tracing::info!(suites = started.iter().filter(|e| e.get("evaluation_id").is_some()).count(), "nightly sweep started");
-                    spawn_sweep_report(Arc::clone(&state), tenant.tenant().to_owned(), started, true);
+                    tracing::info!(
+                        suites = started
+                            .iter()
+                            .filter(|e| e.get("evaluation_id").is_some())
+                            .count(),
+                        "nightly sweep started"
+                    );
+                    spawn_sweep_report(
+                        Arc::clone(&state),
+                        tenant.tenant().to_owned(),
+                        started,
+                        true,
+                    );
                 }
                 Err(error) => tracing::warn!(?error, "nightly sweep could not start"),
             }
@@ -1726,7 +1832,10 @@ pub(crate) fn spawn_sweeper(state: Arc<crate::routes::AppState>) {
                 }
             }
             let checked = crate::freshness::check_all(&state, &tenant).await;
-            let stale = checked.iter().filter(|c| c["stale"] == serde_json::Value::Bool(true)).count();
+            let stale = checked
+                .iter()
+                .filter(|c| c["stale"] == serde_json::Value::Bool(true))
+                .count();
             if !checked.is_empty() {
                 tracing::info!(checked = checked.len(), stale, "nightly freshness check");
             }
@@ -1753,9 +1862,17 @@ pub(crate) async fn delete_dataset(
         .map_err(crate::routes::internal_err)?
     {
         Some(item) => decode(item.value, "dataset catalog")?,
-        None => StoredDatasetCatalog { records: Vec::new(), truncated: false },
+        None => StoredDatasetCatalog {
+            records: Vec::new(),
+            truncated: false,
+        },
     };
-    let versions: Vec<String> = catalog.records.iter().filter(|r| r.name == name).map(|r| r.version.clone()).collect();
+    let versions: Vec<String> = catalog
+        .records
+        .iter()
+        .filter(|r| r.name == name)
+        .map(|r| r.version.clone())
+        .collect();
     if versions.is_empty() {
         return Err(ApiError::not_found(format!("dataset `{name}` not found")));
     }
@@ -1773,7 +1890,10 @@ pub(crate) async fn delete_dataset(
     for version in &versions {
         state
             .server_store
-            .kv_delete(&namespace(tenant, DATASET_NAMESPACE), &dataset_key(name, version))
+            .kv_delete(
+                &namespace(tenant, DATASET_NAMESPACE),
+                &dataset_key(name, version),
+            )
             .await
             .map_err(crate::routes::internal_err)?;
         state

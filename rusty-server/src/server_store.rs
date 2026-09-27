@@ -53,6 +53,7 @@ use rusty_agent_runtime::registry::{ArtifactCommit, ArtifactRecord};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+use crate::accepted_runs::{self, AcceptedRunRecord};
 use crate::agents::{
     self, ActivationLease, ActivationMutation, ActivationOutcome, AgentRecord, MailboxClaim,
     MailboxClaimScope,
@@ -77,7 +78,6 @@ use crate::learn;
 use crate::memory;
 use crate::outbox::{self, OutboxRecord};
 use crate::pending_runs::{self, PendingRunRecord};
-use crate::accepted_runs::{self, AcceptedRunRecord};
 use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyWrite};
 use crate::receipts::ReceiptKeyRecord;
 use crate::registry;
@@ -95,7 +95,9 @@ pub(crate) type StoreResult<T> = Result<T, String>;
 /// keep it. Doors ask first and say so in their own words.
 pub(crate) fn refuse_secret(content: &Value) -> StoreResult<()> {
     match rusty_agent_runtime::memory::secret_in(content) {
-        Some(what) => Err(format!("not kept: the note carries {what}; credentials live in connections, never in memory")),
+        Some(what) => Err(format!(
+            "not kept: the note carries {what}; credentials live in connections, never in memory"
+        )),
         None => Ok(()),
     }
 }
@@ -151,7 +153,11 @@ pub(crate) trait ServerStore: Send + Sync {
     /// Clear a version's decline: a working copy that lands on a version
     /// declined as superseded is that version, served again. `false` when
     /// there was no decline to clear.
-    async fn revive_assistant_version(&self, assistant_id: &str, version_id: &str) -> StoreResult<bool>;
+    async fn revive_assistant_version(
+        &self,
+        assistant_id: &str,
+        version_id: &str,
+    ) -> StoreResult<bool>;
 
     /// Insert a new cron; `false` (no write) when the id exists.
     async fn create_cron(&self, record: &CronRecord) -> StoreResult<bool>;
@@ -249,7 +255,12 @@ pub(crate) trait ServerStore: Send + Sync {
     /// its own derives them from its journals — correct, and as slow as
     /// reading every one.
     async fn list_journal_heads(&self) -> StoreResult<Vec<crate::journals::JournalHead>> {
-        Ok(self.list_journals().await?.iter().map(crate::journals::head_of).collect())
+        Ok(self
+            .list_journals()
+            .await?
+            .iter()
+            .map(crate::journals::head_of)
+            .collect())
     }
 
     // -- Durable pending-run queue (R1.0 gate) ------------------------- //
@@ -313,7 +324,10 @@ pub(crate) trait ServerStore: Send + Sync {
         Ok(())
     }
     /// The session under `token_hash`, expired or not; `None` when unknown.
-    async fn get_session(&self, _token_hash: &str) -> StoreResult<Option<crate::users::SessionRecord>> {
+    async fn get_session(
+        &self,
+        _token_hash: &str,
+    ) -> StoreResult<Option<crate::users::SessionRecord>> {
         Ok(None)
     }
     /// Forget a session: sign-out, or expiry noticed.
@@ -326,11 +340,16 @@ pub(crate) trait ServerStore: Send + Sync {
         Err("this store keeps no model configuration".to_owned())
     }
     /// The egress ceiling an administrator kept; `None` when nobody has.
-    async fn get_egress_ceiling(&self) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
+    async fn get_egress_ceiling(
+        &self,
+    ) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
         Ok(None)
     }
     /// Keep the egress ceiling.
-    async fn put_egress_ceiling(&self, _ceiling: &crate::egress_ceiling::EgressCeiling) -> StoreResult<()> {
+    async fn put_egress_ceiling(
+        &self,
+        _ceiling: &crate::egress_ceiling::EgressCeiling,
+    ) -> StoreResult<()> {
         Err("this store keeps no egress ceiling".to_owned())
     }
     /// The connection binding history; `None` when nothing was ever bound.
@@ -342,13 +361,22 @@ pub(crate) trait ServerStore: Send + Sync {
         Err("this store keeps no binding history".to_owned())
     }
     /// The assignments, of one tenant or all.
-    async fn list_assignments(&self, _tenant: Option<&str>) -> StoreResult<Vec<crate::assignments::Assignment>> {
+    async fn list_assignments(
+        &self,
+        _tenant: Option<&str>,
+    ) -> StoreResult<Vec<crate::assignments::Assignment>> {
         Ok(Vec::new())
     }
-    async fn get_assignment(&self, _id: &str) -> StoreResult<Option<crate::assignments::Assignment>> {
+    async fn get_assignment(
+        &self,
+        _id: &str,
+    ) -> StoreResult<Option<crate::assignments::Assignment>> {
         Ok(None)
     }
-    async fn put_assignment(&self, _assignment: &crate::assignments::Assignment) -> StoreResult<()> {
+    async fn put_assignment(
+        &self,
+        _assignment: &crate::assignments::Assignment,
+    ) -> StoreResult<()> {
         Err("this store keeps no assignments".to_owned())
     }
 
@@ -1518,7 +1546,10 @@ pub(crate) struct JsonFileStore {
 impl JsonFileStore {
     /// Load the persisted assistants/crons/threads under `root` into memory.
     pub(crate) fn load(root: &Path) -> Self {
-        Self::load_with_vault(root, std::sync::Arc::new(crate::vault::PersonVault::new(root)))
+        Self::load_with_vault(
+            root,
+            std::sync::Arc::new(crate::vault::PersonVault::new(root)),
+        )
     }
 
     /// The vault this store seals a person's records with.
@@ -1526,7 +1557,10 @@ impl JsonFileStore {
         std::sync::Arc::clone(&self.vault)
     }
 
-    pub(crate) fn load_with_vault(root: &Path, vault: std::sync::Arc<crate::vault::PersonVault>) -> Self {
+    pub(crate) fn load_with_vault(
+        root: &Path,
+        vault: std::sync::Arc<crate::vault::PersonVault>,
+    ) -> Self {
         Self {
             root: root.to_path_buf(),
             vault,
@@ -1611,9 +1645,15 @@ impl JsonFileStore {
         if let Some(found) = self.run_persons.lock().await.get(run_id).cloned() {
             return Some(found);
         }
-        let record = accepted_runs::load(&self.root, run_id, Some(&self.vault)).await.ok().flatten()?;
+        let record = accepted_runs::load(&self.root, run_id, Some(&self.vault))
+            .await
+            .ok()
+            .flatten()?;
         let person = accepted_runs::person_of(&record)?;
-        self.run_persons.lock().await.insert(run_id.to_owned(), person.clone());
+        self.run_persons
+            .lock()
+            .await
+            .insert(run_id.to_owned(), person.clone());
         Some(person)
     }
 }
@@ -1802,7 +1842,11 @@ impl ServerStore for JsonFileStore {
         Ok(DeclineVersionOutcome::Declined { record: next })
     }
 
-    async fn revive_assistant_version(&self, assistant_id: &str, version_id: &str) -> StoreResult<bool> {
+    async fn revive_assistant_version(
+        &self,
+        assistant_id: &str,
+        version_id: &str,
+    ) -> StoreResult<bool> {
         let mut map = self.assistants.lock().await;
         let Some(current) = map.get(assistant_id) else {
             return Ok(false);
@@ -2055,9 +2099,14 @@ impl ServerStore for JsonFileStore {
     async fn put_journal(&self, snapshot: &JournalSnapshot) -> StoreResult<()> {
         let person = self.person_of_run(&snapshot.run_id).await;
         *self.journal_heads.lock().await = None;
-        journals::persist(&self.root, snapshot, Some(&self.vault), person.as_ref().map(|(t, p)| (t.as_str(), p.as_str())))
-            .await
-            .map_err(io_err("persist journal"))
+        journals::persist(
+            &self.root,
+            snapshot,
+            Some(&self.vault),
+            person.as_ref().map(|(t, p)| (t.as_str(), p.as_str())),
+        )
+        .await
+        .map_err(io_err("persist journal"))
     }
 
     async fn get_journal(&self, run_id: &str) -> StoreResult<Option<JournalSnapshot>> {
@@ -2086,7 +2135,9 @@ impl ServerStore for JsonFileStore {
 
     async fn delete_journal(&self, run_id: &str) -> StoreResult<bool> {
         *self.journal_heads.lock().await = None;
-        journals::remove(&self.root, run_id).await.map_err(io_err("remove journal"))
+        journals::remove(&self.root, run_id)
+            .await
+            .map_err(io_err("remove journal"))
     }
 
     async fn put_pending_run(&self, record: &PendingRunRecord) -> StoreResult<()> {
@@ -2110,11 +2161,19 @@ impl ServerStore for JsonFileStore {
     async fn put_accepted_run(&self, record: &AcceptedRunRecord) -> StoreResult<()> {
         let person = accepted_runs::person_of(record);
         if let Some(person) = &person {
-            self.run_persons.lock().await.insert(record.run_id.clone(), person.clone());
+            self.run_persons
+                .lock()
+                .await
+                .insert(record.run_id.clone(), person.clone());
         }
-        accepted_runs::persist(&self.root, record, Some(&self.vault), person.as_ref().map(|(t, p)| (t.as_str(), p.as_str())))
-            .await
-            .map_err(io_err("persist accepted run"))
+        accepted_runs::persist(
+            &self.root,
+            record,
+            Some(&self.vault),
+            person.as_ref().map(|(t, p)| (t.as_str(), p.as_str())),
+        )
+        .await
+        .map_err(io_err("persist accepted run"))
     }
 
     async fn get_accepted_run(&self, run_id: &str) -> StoreResult<Option<AcceptedRunRecord>> {
@@ -2124,16 +2183,26 @@ impl ServerStore for JsonFileStore {
     }
 
     async fn list_accepted_runs(&self) -> StoreResult<Vec<AcceptedRunRecord>> {
-        accepted_runs::list(&self.root, Some(&self.vault)).await.map_err(io_err("list accepted runs"))
+        accepted_runs::list(&self.root, Some(&self.vault))
+            .await
+            .map_err(io_err("list accepted runs"))
     }
 
     async fn delete_accepted_run(&self, run_id: &str) -> StoreResult<bool> {
         self.run_persons.lock().await.remove(run_id);
-        accepted_runs::remove(&self.root, run_id).await.map_err(io_err("remove accepted run"))
+        accepted_runs::remove(&self.root, run_id)
+            .await
+            .map_err(io_err("remove accepted run"))
     }
 
     async fn list_threads(&self) -> StoreResult<Vec<(String, ThreadRecord)>> {
-        Ok(self.threads.lock().await.iter().map(|(id, record)| (id.clone(), record.clone())).collect())
+        Ok(self
+            .threads
+            .lock()
+            .await
+            .iter()
+            .map(|(id, record)| (id.clone(), record.clone()))
+            .collect())
     }
 
     async fn delete_thread(&self, internal_id: &str) -> StoreResult<bool> {
@@ -2158,18 +2227,27 @@ impl ServerStore for JsonFileStore {
 
     async fn put_session(&self, record: &crate::users::SessionRecord) -> StoreResult<()> {
         let dir = self.root.join("sessions");
-        tokio::fs::create_dir_all(&dir).await.map_err(io_err("create sessions dir"))?;
-        let bytes = serde_json::to_vec_pretty(record).map_err(|e| format!("serialize session: {e}"))?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(io_err("create sessions dir"))?;
+        let bytes =
+            serde_json::to_vec_pretty(record).map_err(|e| format!("serialize session: {e}"))?;
         tokio::fs::write(dir.join(format!("{}.json", record.token_hash)), bytes)
             .await
             .map_err(io_err("write session"))
     }
 
-    async fn get_session(&self, token_hash: &str) -> StoreResult<Option<crate::users::SessionRecord>> {
+    async fn get_session(
+        &self,
+        token_hash: &str,
+    ) -> StoreResult<Option<crate::users::SessionRecord>> {
         if token_hash.is_empty() || !token_hash.chars().all(|c| c.is_ascii_hexdigit()) {
             return Ok(None);
         }
-        let path = self.root.join("sessions").join(format!("{token_hash}.json"));
+        let path = self
+            .root
+            .join("sessions")
+            .join(format!("{token_hash}.json"));
         match tokio::fs::read(&path).await {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
@@ -2182,7 +2260,9 @@ impl ServerStore for JsonFileStore {
     async fn get_llm_config(&self) -> StoreResult<Option<crate::llm_providers::LlmConfig>> {
         let path = self.root.join("llm").join("config.json");
         match tokio::fs::read(&path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| format!("read model providers: {e}")),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("read model providers: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("read model providers")(e)),
         }
@@ -2190,31 +2270,50 @@ impl ServerStore for JsonFileStore {
 
     async fn put_llm_config(&self, config: &crate::llm_providers::LlmConfig) -> StoreResult<()> {
         let dir = self.root.join("llm");
-        tokio::fs::create_dir_all(&dir).await.map_err(io_err("create llm dir"))?;
-        let bytes = serde_json::to_vec_pretty(config).map_err(|e| format!("serialize model providers: {e}"))?;
-        tokio::fs::write(dir.join("config.json"), bytes).await.map_err(io_err("write model providers"))
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(io_err("create llm dir"))?;
+        let bytes = serde_json::to_vec_pretty(config)
+            .map_err(|e| format!("serialize model providers: {e}"))?;
+        tokio::fs::write(dir.join("config.json"), bytes)
+            .await
+            .map_err(io_err("write model providers"))
     }
 
-    async fn get_egress_ceiling(&self) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
+    async fn get_egress_ceiling(
+        &self,
+    ) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
         let path = self.root.join("egress").join("ceiling.json");
         match tokio::fs::read(&path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| format!("read egress ceiling: {e}")),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("read egress ceiling: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("read egress ceiling")(e)),
         }
     }
 
-    async fn put_egress_ceiling(&self, ceiling: &crate::egress_ceiling::EgressCeiling) -> StoreResult<()> {
+    async fn put_egress_ceiling(
+        &self,
+        ceiling: &crate::egress_ceiling::EgressCeiling,
+    ) -> StoreResult<()> {
         let dir = self.root.join("egress");
-        tokio::fs::create_dir_all(&dir).await.map_err(io_err("create egress dir"))?;
-        let bytes = serde_json::to_vec_pretty(ceiling).map_err(|e| format!("serialize egress ceiling: {e}"))?;
-        tokio::fs::write(dir.join("ceiling.json"), bytes).await.map_err(io_err("write egress ceiling"))
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(io_err("create egress dir"))?;
+        let bytes = serde_json::to_vec_pretty(ceiling)
+            .map_err(|e| format!("serialize egress ceiling: {e}"))?;
+        tokio::fs::write(dir.join("ceiling.json"), bytes)
+            .await
+            .map_err(io_err("write egress ceiling"))
     }
 
     async fn get_bindings(&self) -> StoreResult<Option<Vec<crate::connectors::Binding>>> {
         let path = self.root.join("connectors").join("bindings.json");
         match tokio::fs::read(&path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| format!("read binding history: {e}")),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("read binding history: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("read binding history")(e)),
         }
@@ -2222,12 +2321,20 @@ impl ServerStore for JsonFileStore {
 
     async fn put_bindings(&self, history: &[crate::connectors::Binding]) -> StoreResult<()> {
         let dir = self.root.join("connectors");
-        tokio::fs::create_dir_all(&dir).await.map_err(io_err("create connectors dir"))?;
-        let bytes = serde_json::to_vec_pretty(history).map_err(|e| format!("serialize binding history: {e}"))?;
-        tokio::fs::write(dir.join("bindings.json"), bytes).await.map_err(io_err("write binding history"))
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(io_err("create connectors dir"))?;
+        let bytes = serde_json::to_vec_pretty(history)
+            .map_err(|e| format!("serialize binding history: {e}"))?;
+        tokio::fs::write(dir.join("bindings.json"), bytes)
+            .await
+            .map_err(io_err("write binding history"))
     }
 
-    async fn list_assignments(&self, tenant: Option<&str>) -> StoreResult<Vec<crate::assignments::Assignment>> {
+    async fn list_assignments(
+        &self,
+        tenant: Option<&str>,
+    ) -> StoreResult<Vec<crate::assignments::Assignment>> {
         let dir = self.root.join("assignments");
         let mut out = Vec::new();
         let mut entries = match tokio::fs::read_dir(&dir).await {
@@ -2235,13 +2342,20 @@ impl ServerStore for JsonFileStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
             Err(e) => return Err(io_err("read assignments dir")(e)),
         };
-        while let Some(entry) = entries.next_entry().await.map_err(io_err("read assignments dir"))? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(io_err("read assignments dir"))?
+        {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let bytes = tokio::fs::read(&path).await.map_err(io_err("read assignment"))?;
-            let assignment: crate::assignments::Assignment = serde_json::from_slice(&bytes).map_err(|e| format!("read assignment {}: {e}", path.display()))?;
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(io_err("read assignment"))?;
+            let assignment: crate::assignments::Assignment = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("read assignment {}: {e}", path.display()))?;
             if tenant.is_none_or(|t| t == assignment.tenant) {
                 out.push(assignment);
             }
@@ -2249,10 +2363,15 @@ impl ServerStore for JsonFileStore {
         Ok(out)
     }
 
-    async fn get_assignment(&self, id: &str) -> StoreResult<Option<crate::assignments::Assignment>> {
+    async fn get_assignment(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<crate::assignments::Assignment>> {
         let path = self.root.join("assignments").join(format!("{id}.json"));
         match tokio::fs::read(&path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| format!("read assignment: {e}")),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| format!("read assignment: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("read assignment")(e)),
         }
@@ -2260,15 +2379,25 @@ impl ServerStore for JsonFileStore {
 
     async fn put_assignment(&self, assignment: &crate::assignments::Assignment) -> StoreResult<()> {
         let dir = self.root.join("assignments");
-        tokio::fs::create_dir_all(&dir).await.map_err(io_err("create assignments dir"))?;
-        let bytes = serde_json::to_vec_pretty(assignment).map_err(|e| format!("serialize assignment: {e}"))?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(io_err("create assignments dir"))?;
+        let bytes = serde_json::to_vec_pretty(assignment)
+            .map_err(|e| format!("serialize assignment: {e}"))?;
         let tmp = dir.join(format!("{}.json.tmp", assignment.assignment_id));
-        tokio::fs::write(&tmp, bytes).await.map_err(io_err("write assignment"))?;
-        tokio::fs::rename(&tmp, dir.join(format!("{}.json", assignment.assignment_id))).await.map_err(io_err("rename assignment"))
+        tokio::fs::write(&tmp, bytes)
+            .await
+            .map_err(io_err("write assignment"))?;
+        tokio::fs::rename(&tmp, dir.join(format!("{}.json", assignment.assignment_id)))
+            .await
+            .map_err(io_err("rename assignment"))
     }
 
     async fn delete_session(&self, token_hash: &str) -> StoreResult<()> {
-        let path = self.root.join("sessions").join(format!("{token_hash}.json"));
+        let path = self
+            .root
+            .join("sessions")
+            .join(format!("{token_hash}.json"));
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -2553,10 +2682,7 @@ impl ServerStore for JsonFileStore {
             .lock()
             .await
             .values()
-            .filter(|t| {
-                t.tenant == tenant
-                    && t.parent_task_id.as_deref() == Some(parent_task_id)
-            })
+            .filter(|t| t.tenant == tenant && t.parent_task_id.as_deref() == Some(parent_task_id))
             .cloned()
             .collect();
         tasks.sort_by(|a, b| {
@@ -4200,8 +4326,8 @@ mod postgres {
     };
     use crate::assistants::{
         ActivateVersionOutcome, AssistantRecord, AssistantVersionRecord, AssistantView,
-        CreateVersionOutcome, DeclineVersionOutcome, SetLifecycleOutcome, ASSISTANT_LINEAGE_BYTES_LIMIT,
-        ASSISTANT_VERSION_BYTES_LIMIT, ASSISTANT_VERSION_LIMIT,
+        CreateVersionOutcome, DeclineVersionOutcome, SetLifecycleOutcome,
+        ASSISTANT_LINEAGE_BYTES_LIMIT, ASSISTANT_VERSION_BYTES_LIMIT, ASSISTANT_VERSION_LIMIT,
     };
     #[cfg(feature = "capsules")]
     use crate::capsule_policy::{
@@ -5131,8 +5257,7 @@ mod postgres {
     pub(crate) const SELECT_SESSION_SQL: &str =
         "SELECT payload FROM server_sessions WHERE token_hash = $1";
 
-    pub(crate) const DELETE_SESSION_SQL: &str =
-        "DELETE FROM server_sessions WHERE token_hash = $1";
+    pub(crate) const DELETE_SESSION_SQL: &str = "DELETE FROM server_sessions WHERE token_hash = $1";
 
     /// `server_llm`: the one model-providers configuration, as a document.
     pub(crate) const CREATE_LLM_SQL: &str = "
@@ -5157,7 +5282,8 @@ mod postgres {
         INSERT INTO server_egress (id, payload) VALUES ('ceiling', $1)
         ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload";
 
-    pub(crate) const SELECT_EGRESS_SQL: &str = "SELECT payload FROM server_egress WHERE id = 'ceiling'";
+    pub(crate) const SELECT_EGRESS_SQL: &str =
+        "SELECT payload FROM server_egress WHERE id = 'ceiling'";
 
     pub(crate) const CREATE_BINDINGS_SQL: &str = "
         CREATE TABLE IF NOT EXISTS server_bindings (
@@ -5169,7 +5295,8 @@ mod postgres {
         INSERT INTO server_bindings (id, payload) VALUES ('history', $1)
         ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload";
 
-    pub(crate) const SELECT_BINDINGS_SQL: &str = "SELECT payload FROM server_bindings WHERE id = 'history'";
+    pub(crate) const SELECT_BINDINGS_SQL: &str =
+        "SELECT payload FROM server_bindings WHERE id = 'history'";
 
     pub(crate) const CREATE_ASSIGNMENTS_SQL: &str = "
         CREATE TABLE IF NOT EXISTS server_assignments (
@@ -5182,7 +5309,8 @@ mod postgres {
         INSERT INTO server_assignments (id, tenant, payload) VALUES ($1, $2, $3)
         ON CONFLICT (id) DO UPDATE SET tenant = EXCLUDED.tenant, payload = EXCLUDED.payload";
 
-    pub(crate) const SELECT_ASSIGNMENT_SQL: &str = "SELECT payload FROM server_assignments WHERE id = $1";
+    pub(crate) const SELECT_ASSIGNMENT_SQL: &str =
+        "SELECT payload FROM server_assignments WHERE id = $1";
 
     pub(crate) const LIST_ASSIGNMENTS_SQL: &str = "SELECT payload FROM server_assignments";
 
@@ -6699,7 +6827,9 @@ mod postgres {
             } else if record.active_version_id() == decline.version_id {
                 DeclineVersionOutcome::Active
             } else if record.decline_of(&decline.version_id).is_some() {
-                DeclineVersionOutcome::Already { record: record.clone() }
+                DeclineVersionOutcome::Already {
+                    record: record.clone(),
+                }
             } else {
                 record.declined.push(decline.clone());
                 sqlx::query(UPDATE_ASSISTANT_SQL)
@@ -6708,7 +6838,9 @@ mod postgres {
                     .execute(&mut *tx)
                     .await
                     .map_err(db_err("decline assistant version"))?;
-                DeclineVersionOutcome::Declined { record: record.clone() }
+                DeclineVersionOutcome::Declined {
+                    record: record.clone(),
+                }
             };
             tx.commit()
                 .await
@@ -6716,7 +6848,11 @@ mod postgres {
             Ok(outcome)
         }
 
-        async fn revive_assistant_version(&self, assistant_id: &str, version_id: &str) -> StoreResult<bool> {
+        async fn revive_assistant_version(
+            &self,
+            assistant_id: &str,
+            version_id: &str,
+        ) -> StoreResult<bool> {
             let pool = self.pool().await?;
             let mut tx = pool
                 .begin()
@@ -6728,7 +6864,9 @@ mod postgres {
                 .await
                 .map_err(db_err("lock assistant for revive"))?;
             let Some(row) = row else {
-                tx.commit().await.map_err(db_err("commit missing assistant revive transaction"))?;
+                tx.commit()
+                    .await
+                    .map_err(db_err("commit missing assistant revive transaction"))?;
                 return Ok(false);
             };
             let mut record = assistant_from_payload(row.get::<Value, _>("payload"))?;
@@ -7184,14 +7322,22 @@ mod postgres {
             Ok(())
         }
 
-        async fn get_session(&self, token_hash: &str) -> StoreResult<Option<crate::users::SessionRecord>> {
+        async fn get_session(
+            &self,
+            token_hash: &str,
+        ) -> StoreResult<Option<crate::users::SessionRecord>> {
             let row = sqlx::query(SELECT_SESSION_SQL)
                 .bind(token_hash)
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("get session"))?;
-            row.map(|row| record_from_payload::<crate::users::SessionRecord>("session", row.get::<Value, _>("payload")))
-                .transpose()
+            row.map(|row| {
+                record_from_payload::<crate::users::SessionRecord>(
+                    "session",
+                    row.get::<Value, _>("payload"),
+                )
+            })
+            .transpose()
         }
 
         async fn get_llm_config(&self) -> StoreResult<Option<crate::llm_providers::LlmConfig>> {
@@ -7199,11 +7345,19 @@ mod postgres {
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("get model providers"))?;
-            row.map(|row| record_from_payload::<crate::llm_providers::LlmConfig>("model providers", row.get::<Value, _>("payload")))
-                .transpose()
+            row.map(|row| {
+                record_from_payload::<crate::llm_providers::LlmConfig>(
+                    "model providers",
+                    row.get::<Value, _>("payload"),
+                )
+            })
+            .transpose()
         }
 
-        async fn put_llm_config(&self, config: &crate::llm_providers::LlmConfig) -> StoreResult<()> {
+        async fn put_llm_config(
+            &self,
+            config: &crate::llm_providers::LlmConfig,
+        ) -> StoreResult<()> {
             let payload = record_to_payload(config)?;
             sqlx::query(UPSERT_LLM_SQL)
                 .bind(payload)
@@ -7213,16 +7367,26 @@ mod postgres {
             Ok(())
         }
 
-        async fn get_egress_ceiling(&self) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
+        async fn get_egress_ceiling(
+            &self,
+        ) -> StoreResult<Option<crate::egress_ceiling::EgressCeiling>> {
             let row = sqlx::query(SELECT_EGRESS_SQL)
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("get egress ceiling"))?;
-            row.map(|row| record_from_payload::<crate::egress_ceiling::EgressCeiling>("egress ceiling", row.get::<Value, _>("payload")))
-                .transpose()
+            row.map(|row| {
+                record_from_payload::<crate::egress_ceiling::EgressCeiling>(
+                    "egress ceiling",
+                    row.get::<Value, _>("payload"),
+                )
+            })
+            .transpose()
         }
 
-        async fn put_egress_ceiling(&self, ceiling: &crate::egress_ceiling::EgressCeiling) -> StoreResult<()> {
+        async fn put_egress_ceiling(
+            &self,
+            ceiling: &crate::egress_ceiling::EgressCeiling,
+        ) -> StoreResult<()> {
             let payload = record_to_payload(ceiling)?;
             sqlx::query(UPSERT_EGRESS_SQL)
                 .bind(payload)
@@ -7237,8 +7401,13 @@ mod postgres {
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("get binding history"))?;
-            row.map(|row| record_from_payload::<Vec<crate::connectors::Binding>>("binding history", row.get::<Value, _>("payload")))
-                .transpose()
+            row.map(|row| {
+                record_from_payload::<Vec<crate::connectors::Binding>>(
+                    "binding history",
+                    row.get::<Value, _>("payload"),
+                )
+            })
+            .transpose()
         }
 
         async fn put_bindings(&self, history: &[crate::connectors::Binding]) -> StoreResult<()> {
@@ -7251,14 +7420,20 @@ mod postgres {
             Ok(())
         }
 
-        async fn list_assignments(&self, tenant: Option<&str>) -> StoreResult<Vec<crate::assignments::Assignment>> {
+        async fn list_assignments(
+            &self,
+            tenant: Option<&str>,
+        ) -> StoreResult<Vec<crate::assignments::Assignment>> {
             let rows = sqlx::query(LIST_ASSIGNMENTS_SQL)
                 .fetch_all(self.pool().await?)
                 .await
                 .map_err(db_err("list assignments"))?;
             let mut out = Vec::with_capacity(rows.len());
             for row in rows {
-                let a = record_from_payload::<crate::assignments::Assignment>("assignment", row.get::<Value, _>("payload"))?;
+                let a = record_from_payload::<crate::assignments::Assignment>(
+                    "assignment",
+                    row.get::<Value, _>("payload"),
+                )?;
                 if tenant.is_none_or(|t| t == a.tenant) {
                     out.push(a);
                 }
@@ -7266,17 +7441,28 @@ mod postgres {
             Ok(out)
         }
 
-        async fn get_assignment(&self, id: &str) -> StoreResult<Option<crate::assignments::Assignment>> {
+        async fn get_assignment(
+            &self,
+            id: &str,
+        ) -> StoreResult<Option<crate::assignments::Assignment>> {
             let row = sqlx::query(SELECT_ASSIGNMENT_SQL)
                 .bind(id)
                 .fetch_optional(self.pool().await?)
                 .await
                 .map_err(db_err("get assignment"))?;
-            row.map(|row| record_from_payload::<crate::assignments::Assignment>("assignment", row.get::<Value, _>("payload")))
-                .transpose()
+            row.map(|row| {
+                record_from_payload::<crate::assignments::Assignment>(
+                    "assignment",
+                    row.get::<Value, _>("payload"),
+                )
+            })
+            .transpose()
         }
 
-        async fn put_assignment(&self, assignment: &crate::assignments::Assignment) -> StoreResult<()> {
+        async fn put_assignment(
+            &self,
+            assignment: &crate::assignments::Assignment,
+        ) -> StoreResult<()> {
             let payload = record_to_payload(assignment)?;
             sqlx::query(UPSERT_ASSIGNMENT_SQL)
                 .bind(&assignment.assignment_id)
@@ -11353,7 +11539,11 @@ impl ConnectorPlane {
 
     /// Remove an instance and its sealed envelopes. `false` when there was
     /// nothing to remove for this tenant — never a cross-tenant answer.
-    pub(crate) async fn delete_instance(&self, tenant: &str, instance_id: &str) -> StoreResult<bool> {
+    pub(crate) async fn delete_instance(
+        &self,
+        tenant: &str,
+        instance_id: &str,
+    ) -> StoreResult<bool> {
         let scoped = crate::auth::scope_id(tenant, instance_id);
         let mut map = self.instances.lock().await;
         if !map.contains_key(&scoped) {

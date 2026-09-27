@@ -125,7 +125,9 @@ fn every_mounted_route_declares_its_scope() {
         undeclared.len(),
         undeclared
             .iter()
-            .map(|(v, p)| format!("  table.declare(\"{v}\", \"{p}\", Scope::parse(\"resource:action\").unwrap());"))
+            .map(|(v, p)| format!(
+                "  table.declare(\"{v}\", \"{p}\", Scope::parse(\"resource:action\").unwrap());"
+            ))
             .collect::<Vec<_>>()
             .join("\n"),
     );

@@ -4,16 +4,16 @@
 //! that reads as absent, while everyone else's history stands.
 use std::sync::Arc;
 
-use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::error::Result as RustyResult;
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse};
-use rusty_agent_runtime::react::{MESSAGES_CHANNEL, create_react_agent};
+use rusty_agent_runtime::react::{create_react_agent, MESSAGES_CHANNEL};
 use rusty_agent_runtime::state::{Reducer, StateSpec};
 use rusty_agent_runtime::tool::ToolRegistry;
-use rusty_agent_server::{GraphRegistry, Principal, PrincipalKind, Role, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, Principal, PrincipalKind, Role, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 struct Brief;
@@ -128,8 +128,8 @@ async fn listed(app: &Router, key: &str) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn forgetting_a_person_destroys_their_key_and_a_restored_backup_holds_only_ciphertext_of_them()
- {
+async fn forgetting_a_person_destroys_their_key_and_a_restored_backup_holds_only_ciphertext_of_them(
+) {
     let base = std::env::temp_dir().join(format!("rusty-forget-{}", uuid::Uuid::new_v4()));
     let store = base.join("store");
     let backups = base.join("backups");

@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, Role};
-use rusty_agent_runtime::react::{REPEATED_CALL_NOTICE, UNKNOWN_OUTCOME_NOTICE, UNRECORDED_READ_NOTICE};
+use rusty_agent_runtime::react::{
+    REPEATED_CALL_NOTICE, UNKNOWN_OUTCOME_NOTICE, UNRECORDED_READ_NOTICE,
+};
 use rusty_agent_runtime::tool::ToolCapability;
 
 /// The judge's standing instructions. Pinned here so a wording change is a
@@ -69,18 +71,28 @@ const REMEMBERED_NOTES: usize = 40;
 
 /// Every note a run read from memory — each journaled memory read's
 /// assembly, each note once, in the order first read.
-pub fn remembered_in(journal: &rusty_agent_runtime::journal::Journal) -> Vec<rusty_agent_runtime::memory::MemoryRecord> {
+pub fn remembered_in(
+    journal: &rusty_agent_runtime::journal::Journal,
+) -> Vec<rusty_agent_runtime::memory::MemoryRecord> {
     use rusty_agent_runtime::record::{PayloadRef, RunEventKind};
     let snapshot = journal.snapshot();
     let mut seen = std::collections::HashSet::new();
     let mut notes = Vec::new();
-    for event in snapshot.events.iter().filter(|e| e.kind == RunEventKind::MemoryRead) {
+    for event in snapshot
+        .events
+        .iter()
+        .filter(|e| e.kind == RunEventKind::MemoryRead)
+    {
         let output = match &event.output {
             Some(PayloadRef::Inline(v)) => Some(v.clone()),
             Some(PayloadRef::Artifact(a)) => snapshot.artifacts.get(&a.sha256).cloned(),
             None => None,
         };
-        let Some(assembly) = output.and_then(|v| serde_json::from_value::<rusty_agent_runtime::memory::MemoryAssembly>(v).ok()) else { continue };
+        let Some(assembly) = output.and_then(|v| {
+            serde_json::from_value::<rusty_agent_runtime::memory::MemoryAssembly>(v).ok()
+        }) else {
+            continue;
+        };
         for record in assembly.records {
             if seen.insert(record.memory_id.clone()) {
                 notes.push(record);
@@ -95,7 +107,10 @@ pub fn remembered_in(journal: &rusty_agent_runtime::journal::Journal) -> Vec<rus
 /// reads it as it reads a long result, excerpted around what the reply
 /// cites — bounded by count; none when nothing was read. `names` gives an
 /// authoring agent its name, so the judge reads *Incident Q&A*, not an id.
-pub fn remembered_message(records: &[rusty_agent_runtime::memory::MemoryRecord], names: &std::collections::HashMap<String, String>) -> Option<ChatMessage> {
+pub fn remembered_message(
+    records: &[rusty_agent_runtime::memory::MemoryRecord],
+    names: &std::collections::HashMap<String, String>,
+) -> Option<ChatMessage> {
     use rusty_agent_runtime::memory::ProvenanceAuthor;
     use rusty_agent_runtime::record::PayloadRef;
     if records.is_empty() {
@@ -104,8 +119,15 @@ pub fn remembered_message(records: &[rusty_agent_runtime::memory::MemoryRecord],
     let mut lines = vec![REMEMBERED_PREFIX.to_owned()];
     for record in records.iter().take(REMEMBERED_NOTES) {
         let text = match &record.content {
-            PayloadRef::Inline(v) => v.get("text").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| v.to_string()),
-            PayloadRef::Artifact(a) => format!("<note held as artifact {}>", &a.sha256[..12.min(a.sha256.len())]),
+            PayloadRef::Inline(v) => v
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| v.to_string()),
+            PayloadRef::Artifact(a) => format!(
+                "<note held as artifact {}>",
+                &a.sha256[..12.min(a.sha256.len())]
+            ),
         };
         let who = match &record.provenance.author {
             ProvenanceAuthor::Agent { agent_id } => match names.get(agent_id) {
@@ -116,17 +138,28 @@ pub fn remembered_message(records: &[rusty_agent_runtime::memory::MemoryRecord],
             ProvenanceAuthor::Distiller { name } => name.clone(),
             ProvenanceAuthor::System => "the platform".to_owned(),
         };
-        lines.push(format!("- {text} (written by {who}, {})", record.provenance.written_at.format("%Y-%m-%d %H:%M UTC")));
+        lines.push(format!(
+            "- {text} (written by {who}, {})",
+            record.provenance.written_at.format("%Y-%m-%d %H:%M UTC")
+        ));
     }
     if records.len() > REMEMBERED_NOTES {
-        lines.push(format!("- and {} more notes not listed", records.len() - REMEMBERED_NOTES));
+        lines.push(format!(
+            "- and {} more notes not listed",
+            records.len() - REMEMBERED_NOTES
+        ));
     }
     Some(ChatMessage::system(lines.join("\n")))
 }
 
 /// Whether the turn carries a REMEMBERED message — memory was read.
 fn remembered_in_turn(messages: &[ChatMessage]) -> bool {
-    last_turn(messages).iter().any(|m| m.role == Role::System && m.content.as_deref().is_some_and(|c| c.starts_with(REMEMBERED_PREFIX)))
+    last_turn(messages).iter().any(|m| {
+        m.role == Role::System
+            && m.content
+                .as_deref()
+                .is_some_and(|c| c.starts_with(REMEMBERED_PREFIX))
+    })
 }
 
 /// The repair notice for one verdict. `failed` is told so; `unverified` —
@@ -157,8 +190,16 @@ pub fn sends_back(verdict: &Verdict, could_write: bool) -> bool {
     if verdict.evidence.declined > 0 {
         return false;
     }
-    let judge_read = verdict.judge.get("read").and_then(Value::as_bool).unwrap_or(false);
-    verdict.verdict == "failed" || (verdict.verdict == "unverified" && judge_read && verdict.evidence.writes == 0 && could_write)
+    let judge_read = verdict
+        .judge
+        .get("read")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    verdict.verdict == "failed"
+        || (verdict.verdict == "unverified"
+            && judge_read
+            && verdict.evidence.writes == 0
+            && could_write)
 }
 
 /// How long the judge may take. A verdict is worth one call, not a wait.
@@ -270,10 +311,13 @@ pub fn turn_evidence(messages: &[ChatMessage], catalog: &[ToolCapability]) -> Ev
     // whether anything happened. A tool the catalog does not name is not
     // counted either way.
     let writes_state = |tool: &str| {
-        catalog
-            .iter()
-            .find(|c| c.name == tool)
-            .is_some_and(|c| !matches!(c.effect, rusty_agent_runtime::record::Effect::Pure | rusty_agent_runtime::record::Effect::ReadOnly))
+        catalog.iter().find(|c| c.name == tool).is_some_and(|c| {
+            !matches!(
+                c.effect,
+                rusty_agent_runtime::record::Effect::Pure
+                    | rusty_agent_runtime::record::Effect::ReadOnly
+            )
+        })
     };
     let mut calls = Vec::new();
     for (index, message) in turn.iter().enumerate() {
@@ -289,7 +333,9 @@ pub fn turn_evidence(messages: &[ChatMessage], catalog: &[ToolCapability]) -> Ev
                 None => "unanswered",
                 Some(REPEATED_CALL_NOTICE) => "refused",
                 // A person declined it at the approval gate: nothing ran.
-                Some(text) if text.starts_with(rusty_agent_runtime::react::DENIED_NOTICE) => "declined",
+                Some(text) if text.starts_with(rusty_agent_runtime::react::DENIED_NOTICE) => {
+                    "declined"
+                }
                 Some(UNRECORDED_READ_NOTICE) => "lost",
                 Some(UNKNOWN_OUTCOME_NOTICE) => "unknown",
                 Some(text) if text.starts_with("ERROR") => "error",
@@ -313,10 +359,32 @@ pub fn turn_evidence(messages: &[ChatMessage], catalog: &[ToolCapability]) -> Ev
     let succeeded = calls.iter().filter(|c| c.outcome == "ok").count();
     let remembered = last_turn(messages)
         .iter()
-        .filter(|m| m.role == Role::System && m.content.as_deref().is_some_and(|c| c.starts_with(REMEMBERED_PREFIX)))
-        .map(|m| m.content.as_deref().unwrap_or("").lines().skip(1).filter(|l| l.starts_with("- ")).count())
+        .filter(|m| {
+            m.role == Role::System
+                && m.content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with(REMEMBERED_PREFIX))
+        })
+        .map(|m| {
+            m.content
+                .as_deref()
+                .unwrap_or("")
+                .lines()
+                .skip(1)
+                .filter(|l| l.starts_with("- "))
+                .count()
+        })
         .sum();
-    Evidence { calls, remembered, writes, refused, declined, unanswered, errors, succeeded }
+    Evidence {
+        calls,
+        remembered,
+        writes,
+        refused,
+        declined,
+        unanswered,
+        errors,
+        succeeded,
+    }
 }
 
 /// Record-like identifiers in a text — `INC0010097`, `P0000001`, `CHG0030001`:
@@ -385,12 +453,27 @@ fn unshown_identifiers(messages: &[ChatMessage], charter: Option<&str>) -> Vec<S
 
 /// Words a sentence uses to disown a number it names: naming a record
 /// only to say it was wrong is a retraction, not a claim.
-const DISOWNING: [&str; 10] = ["wrong", "incorrect", "not ", "never", "stale", "superseded", "retract", "no tool result", "mistaken", "should not have"];
+const DISOWNING: [&str; 10] = [
+    "wrong",
+    "incorrect",
+    "not ",
+    "never",
+    "stale",
+    "superseded",
+    "retract",
+    "no tool result",
+    "mistaken",
+    "should not have",
+];
 
 /// Whether every sentence of the reply that names `id` disowns it.
 fn disowned(reply: &str, id: &str) -> bool {
     let sentences: Vec<&str> = reply.split(['.', '!', '?', '\n']).collect();
-    let naming: Vec<&str> = sentences.iter().copied().filter(|s| s.contains(id)).collect();
+    let naming: Vec<&str> = sentences
+        .iter()
+        .copied()
+        .filter(|s| s.contains(id))
+        .collect();
     !naming.is_empty()
         && naming.iter().all(|s| {
             let lower = s.to_lowercase();
@@ -431,15 +514,29 @@ fn excerpt_for(text: &str, cited: &[String]) -> String {
             while !text.is_char_boundary(to) {
                 to += 1;
             }
-            windows.push_str(&format!("\n[around {id}, from the part not shown: …{}…]", &text[from..to]));
+            windows.push_str(&format!(
+                "\n[around {id}, from the part not shown: …{}…]",
+                &text[from..to]
+            ));
         }
     }
     let shown = identifiers(head);
-    let beyond: Vec<String> = identifiers(&text[cut..]).into_iter().filter(|id| !shown.contains(id) && !cited.contains(id)).collect();
+    let beyond: Vec<String> = identifiers(&text[cut..])
+        .into_iter()
+        .filter(|id| !shown.contains(id) && !cited.contains(id))
+        .collect();
     let tail = if beyond.is_empty() {
         String::new()
     } else {
-        format!("; other identifiers in the part not shown: {}", beyond.iter().take(40).cloned().collect::<Vec<_>>().join(", "))
+        format!(
+            "; other identifiers in the part not shown: {}",
+            beyond
+                .iter()
+                .take(40)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     };
     format!(
         "{head}… [{} more characters not shown — a fact absent above may be in them; that absence is not evidence{tail}]{windows}",
@@ -460,11 +557,22 @@ fn excerpt(text: &str) -> String {
     // are named, so a reply that cites a record from the part not shown is
     // not taken for a fabrication.
     let shown = identifiers(&text[..cut]);
-    let beyond: Vec<String> = identifiers(&text[cut..]).into_iter().filter(|id| !shown.contains(id)).collect();
+    let beyond: Vec<String> = identifiers(&text[cut..])
+        .into_iter()
+        .filter(|id| !shown.contains(id))
+        .collect();
     let tail = if beyond.is_empty() {
         String::new()
     } else {
-        format!("; identifiers in the part not shown: {}", beyond.iter().take(40).cloned().collect::<Vec<_>>().join(", "))
+        format!(
+            "; identifiers in the part not shown: {}",
+            beyond
+                .iter()
+                .take(40)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     };
     format!(
         "{}… [{} more characters not shown — a fact absent above may be in them; that absence is not evidence{tail}]",
@@ -502,8 +610,16 @@ fn transcript(messages: &[ChatMessage]) -> (String, String, String) {
                 "RESULT: {}",
                 excerpt_for(message.content.as_deref().unwrap_or(""), &cited)
             )),
-            Role::System if message.content.as_deref().is_some_and(|c| c.starts_with(REMEMBERED_PREFIX)) => {
-                did.push(excerpt_for(message.content.as_deref().unwrap_or(""), &cited));
+            Role::System
+                if message
+                    .content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with(REMEMBERED_PREFIX)) =>
+            {
+                did.push(excerpt_for(
+                    message.content.as_deref().unwrap_or(""),
+                    &cited,
+                ));
             }
             _ => {}
         }
@@ -552,7 +668,11 @@ pub async fn verify(
             verdict: "failed".to_owned(),
             reason: format!(
                 "the reply names {first}, which no tool result in this conversation contains{}",
-                if invented.len() > 1 { format!(" (nor {})", invented[1..].join(", ")) } else { String::new() }
+                if invented.len() > 1 {
+                    format!(" (nor {})", invented[1..].join(", "))
+                } else {
+                    String::new()
+                }
             ),
             evidence,
             judge: json!({ "rule": "unshown_identifier", "identifiers": invented }),
@@ -605,7 +725,10 @@ pub async fn verify(
         did,
         reply
     );
-    let asked = vec![ChatMessage::system(VERIFIER_PROMPT), ChatMessage::user(user)];
+    let asked = vec![
+        ChatMessage::system(VERIFIER_PROMPT),
+        ChatMessage::user(user),
+    ];
     let at = chrono::Utc::now();
     let (verdict, reason, judge_record) =
         match tokio::time::timeout(JUDGE_TIMEOUT, judge.chat(&asked, &[])).await {
@@ -614,7 +737,11 @@ pub async fn verify(
                 // `read`: the judge's word was a verdict — an unverified it
                 // chose, not one minted for an answer nobody could read.
                 match parse_answer(&answer) {
-                    Some((verdict, reason)) => (verdict, reason, json!({ "model": response.model, "answer": answer, "read": true })),
+                    Some((verdict, reason)) => (
+                        verdict,
+                        reason,
+                        json!({ "model": response.model, "answer": answer, "read": true }),
+                    ),
                     None => (
                         "unverified".to_owned(),
                         "the judge's answer could not be read as a verdict".to_owned(),
@@ -629,7 +756,10 @@ pub async fn verify(
             ),
             Err(_) => (
                 "unverified".to_owned(),
-                format!("the judge did not answer within {}s", JUDGE_TIMEOUT.as_secs()),
+                format!(
+                    "the judge did not answer within {}s",
+                    JUDGE_TIMEOUT.as_secs()
+                ),
                 json!({ "error": "timeout" }),
             ),
         };
@@ -638,7 +768,11 @@ pub async fn verify(
     // outcome. An agent with tools that touched none of them can be right,
     // but the run cannot show it — unverified, with the reason, however the
     // judge read the reply.
-    let (verdict, reason) = if verdict == "verified" && evidence.calls.is_empty() && !catalog.is_empty() && !remembered_in_turn(messages) {
+    let (verdict, reason) = if verdict == "verified"
+        && evidence.calls.is_empty()
+        && !catalog.is_empty()
+        && !remembered_in_turn(messages)
+    {
         (
             "unverified".to_owned(),
             format!("nothing was called, so the run holds no evidence for the reply; the judge had said: {reason}"),
@@ -695,7 +829,10 @@ impl VerificationPlane {
     /// verdict.
     pub async fn persist_transcript(&self, run_id: &str, messages: &[ChatMessage]) {
         let kept = kept_transcript(messages);
-        if let Err(error) = crate::connectors::persist_json(&self.root, &format!("{run_id}.transcript"), &kept).await {
+        if let Err(error) =
+            crate::connectors::persist_json(&self.root, &format!("{run_id}.transcript"), &kept)
+                .await
+        {
             tracing::warn!(%run_id, %error, "verdict transcript not persisted");
         }
     }
@@ -710,7 +847,6 @@ impl VerificationPlane {
 mod tests {
     use super::*;
 
-
     #[test]
     fn a_number_the_reply_names_only_to_retract_it_is_not_invented() {
         use rusty_agent_runtime::llm::ToolCall;
@@ -722,12 +858,20 @@ mod tests {
             ChatMessage::tool_result("c1", "[{\"number\": \"INC0010106\"}]"),
             ChatMessage::assistant("Newest: INC0010106. What I got wrong: my previous reply cited INC0010004, which no tool result contains."),
         ];
-        assert!(unshown_identifiers(&messages, None).is_empty(), "a retraction is not a claim");
+        assert!(
+            unshown_identifiers(&messages, None).is_empty(),
+            "a retraction is not a claim"
+        );
         // Named as a fact in one sentence and disowned in another: still a claim.
         let mut claimed = messages.clone();
         claimed.pop();
-        claimed.push(ChatMessage::assistant("Newest: INC0010004. Earlier I said INC0010004 was wrong."));
-        assert_eq!(unshown_identifiers(&claimed, None), vec!["INC0010004".to_owned()]);
+        claimed.push(ChatMessage::assistant(
+            "Newest: INC0010004. Earlier I said INC0010004 was wrong.",
+        ));
+        assert_eq!(
+            unshown_identifiers(&claimed, None),
+            vec!["INC0010004".to_owned()]
+        );
     }
 
     #[test]
@@ -736,10 +880,16 @@ mod tests {
             ChatMessage::system("File it."),
             ChatMessage::user("Please file the printer outage."),
             ChatMessage::assistant("Filed INC0099999 for you."),
-            ChatMessage::system(repair_notice("failed", "the reply names INC0099999, which no tool result in this conversation contains")),
+            ChatMessage::system(repair_notice(
+                "failed",
+                "the reply names INC0099999, which no tool result in this conversation contains",
+            )),
             ChatMessage::assistant("Filed INC0099999 for you."),
         ];
-        assert_eq!(unshown_identifiers(&messages, Some("File it.")), vec!["INC0099999".to_owned()]);
+        assert_eq!(
+            unshown_identifiers(&messages, Some("File it.")),
+            vec!["INC0099999".to_owned()]
+        );
     }
     use rusty_agent_runtime::llm::ToolCall;
     use rusty_agent_runtime::record::Effect;
@@ -778,7 +928,11 @@ mod tests {
             messages: &[ChatMessage],
             _tools: &[Value],
         ) -> rusty_agent_runtime::error::Result<rusty_agent_runtime::llm::ChatResponse> {
-            let asked = messages.iter().filter_map(|m| m.content.clone()).collect::<Vec<_>>().join("\n");
+            let asked = messages
+                .iter()
+                .filter_map(|m| m.content.clone())
+                .collect::<Vec<_>>()
+                .join("\n");
             self.0.lock().unwrap().push(asked);
             Ok(rusty_agent_runtime::llm::ChatResponse {
                 message: ChatMessage::assistant(r#"{"verdict": "verified", "reason": "fine"}"#),
@@ -796,7 +950,13 @@ mod tests {
         ];
         let catalog = vec![capability("servicenow.list-records", Effect::ReadOnly)];
         let judge = RecordingJudge(std::sync::Mutex::new(Vec::new()));
-        let _ = verify(&judge, Some("Search kb_knowledge, then answer."), &messages, &catalog).await;
+        let _ = verify(
+            &judge,
+            Some("Search kb_knowledge, then answer."),
+            &messages,
+            &catalog,
+        )
+        .await;
         let asked = judge.0.lock().unwrap().join("\n");
         assert!(asked.contains("NO TOOL WAS CALLED"), "{asked}");
         assert!(asked.contains("0 call(s)"), "{asked}");
@@ -810,9 +970,19 @@ mod tests {
         ];
         let catalog = vec![capability("servicenow.list-records", Effect::ReadOnly)];
         let judge = RecordingJudge(std::sync::Mutex::new(Vec::new()));
-        let verdict = verify(&judge, Some("Search kb_knowledge, then answer."), &messages, &catalog).await;
+        let verdict = verify(
+            &judge,
+            Some("Search kb_knowledge, then answer."),
+            &messages,
+            &catalog,
+        )
+        .await;
         assert_eq!(verdict.verdict, "unverified", "{}", verdict.reason);
-        assert!(verdict.reason.contains("nothing was called"), "{}", verdict.reason);
+        assert!(
+            verdict.reason.contains("nothing was called"),
+            "{}",
+            verdict.reason
+        );
         // An agent with no tools at all is judged on its words alone, and
         // the judge is told its charter is the evidence.
         let verdict = verify(&judge, Some("Answer from what you know."), &messages, &[]).await;
@@ -826,7 +996,11 @@ mod tests {
         let mut text = "x".repeat(RESULT_EXCERPT + 10);
         text.push_str(" ... article KB0010006 and KB0010015 at the end");
         let shown = excerpt(&text);
-        assert!(shown.contains("identifiers in the part not shown: KB0010006, KB0010015"), "{}", &shown[shown.len() - 200..]);
+        assert!(
+            shown.contains("identifiers in the part not shown: KB0010006, KB0010015"),
+            "{}",
+            &shown[shown.len() - 200..]
+        );
         let short = excerpt("KB0010001 fits");
         assert_eq!(short, "KB0010001 fits");
     }
@@ -836,7 +1010,11 @@ mod tests {
         let mut text = "x".repeat(RESULT_EXCERPT + 10);
         text.push_str(" {\"number\":\"KB0010006\",\"text\":\"Download the VPN client from the IT portal, install it, click Connect.\"} {\"number\":\"KB0010015\",\"text\":\"Mac: Cisco AnyConnect, vpn.company.com\"}");
         let shown = excerpt_for(&text, &["KB0010006".to_owned()]);
-        assert!(shown.contains("[around KB0010006, from the part not shown: …"), "{}", &shown[shown.len() - 400..]);
+        assert!(
+            shown.contains("[around KB0010006, from the part not shown: …"),
+            "{}",
+            &shown[shown.len() - 400..]
+        );
         assert!(shown.contains("Download the VPN client from the IT portal"));
         // The record not cited is named, not shown.
         assert!(shown.contains("other identifiers in the part not shown: KB0010015"));
@@ -855,15 +1033,27 @@ mod tests {
     async fn a_number_no_tool_showed_is_a_fabricated_completion_decided_without_the_judge() {
         let messages = vec![
             ChatMessage::user("Problem report from Ivo. Subject: backups fail."),
-            ChatMessage::assistant_tool_calls(vec![ToolCall::new("a", "servicenow.list-records", json!({"table": "problem"}))]),
+            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                "a",
+                "servicenow.list-records",
+                json!({"table": "problem"}),
+            )]),
             ChatMessage::tool_result("a", r#"{"result":[]}"#),
-            ChatMessage::assistant("No existing problem found. Created new problem with number P0000001, state 'New'."),
+            ChatMessage::assistant(
+                "No existing problem found. Created new problem with number P0000001, state 'New'.",
+            ),
         ];
         let catalog = vec![
             capability("servicenow.list-records", Effect::ReadOnly),
             capability("servicenow.create-record", Effect::Compensatable),
         ];
-        let verdict = verify(&NeverAsked, Some("Follow the never-file-twice skill."), &messages, &catalog).await;
+        let verdict = verify(
+            &NeverAsked,
+            Some("Follow the never-file-twice skill."),
+            &messages,
+            &catalog,
+        )
+        .await;
         assert_eq!(verdict.verdict, "failed");
         assert!(verdict.reason.contains("P0000001"), "{}", verdict.reason);
         assert_eq!(verdict.judge["rule"], json!("unshown_identifier"));
@@ -874,14 +1064,26 @@ mod tests {
     fn a_number_the_person_named_or_a_tool_returned_is_not_invented() {
         let messages = vec![
             ChatMessage::user("what about INC0010093?"),
-            ChatMessage::assistant_tool_calls(vec![ToolCall::new("a", "servicenow.list-records", json!({}))]),
+            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                "a",
+                "servicenow.list-records",
+                json!({}),
+            )]),
             ChatMessage::tool_result("a", r#"{"result":[{"number":"INC0010097","state":"New"}]}"#),
             ChatMessage::assistant("INC0010097 is open."),
             ChatMessage::user("and the other one?"),
-            ChatMessage::assistant("INC0010093 is closed; INC0010097 is still open, unlike PRB0040001."),
+            ChatMessage::assistant(
+                "INC0010093 is closed; INC0010097 is still open, unlike PRB0040001.",
+            ),
         ];
-        assert_eq!(unshown_identifiers(&messages, Some("charter")), vec!["PRB0040001"]);
-        assert_eq!(unshown_identifiers(&messages, Some("the charter mentions PRB0040001")), Vec::<String>::new());
+        assert_eq!(
+            unshown_identifiers(&messages, Some("charter")),
+            vec!["PRB0040001"]
+        );
+        assert_eq!(
+            unshown_identifiers(&messages, Some("the charter mentions PRB0040001")),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -890,30 +1092,79 @@ mod tests {
             ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "echo-board.post-notice", serde_json::json!({"text": "hi"}))]),
             ChatMessage::tool_result("c1", format!("{} (Bob: not now). Do not retry it or work around it; say what you would have done and finish.", rusty_agent_runtime::react::DENIED_NOTICE)),
         ];
-        let catalog = vec![capability("read", Effect::ReadOnly), capability("send", Effect::NonIdempotent)];
+        let catalog = vec![
+            capability("read", Effect::ReadOnly),
+            capability("send", Effect::NonIdempotent),
+        ];
         let evidence = turn_evidence(&turn, &catalog);
         assert_eq!(evidence.calls[0].outcome, "declined");
-        assert_eq!((evidence.declined, evidence.refused, evidence.succeeded), (1, 0, 0));
+        assert_eq!(
+            (evidence.declined, evidence.refused, evidence.succeeded),
+            (1, 0, 0)
+        );
     }
 
     fn verdict_with(verdict: &str, read: bool, evidence: Evidence) -> Verdict {
-        Verdict { verdict: verdict.to_owned(), reason: String::new(), evidence, judge: json!({"read": read}), at: chrono::Utc::now(), repaired: None, graph: None }
+        Verdict {
+            verdict: verdict.to_owned(),
+            reason: String::new(),
+            evidence,
+            judge: json!({"read": read}),
+            at: chrono::Utc::now(),
+            repaired: None,
+            graph: None,
+        }
     }
 
     #[test]
     fn what_sends_the_model_back() {
         let nothing = Evidence::default();
-        assert!(sends_back(&verdict_with("failed", true, nothing.clone()), false));
-        assert!(sends_back(&verdict_with("unverified", true, nothing.clone()), true));
+        assert!(sends_back(
+            &verdict_with("failed", true, nothing.clone()),
+            false
+        ));
+        assert!(sends_back(
+            &verdict_with("unverified", true, nothing.clone()),
+            true
+        ));
         // Unsettled but the agent could not have written: left alone.
-        assert!(!sends_back(&verdict_with("unverified", true, nothing.clone()), false));
+        assert!(!sends_back(
+            &verdict_with("unverified", true, nothing.clone()),
+            false
+        ));
         // An unverified minted for an unreadable judge is not the judge's word.
-        assert!(!sends_back(&verdict_with("unverified", false, nothing.clone()), true));
-        assert!(!sends_back(&verdict_with("verified", true, nothing.clone()), true));
+        assert!(!sends_back(
+            &verdict_with("unverified", false, nothing.clone()),
+            true
+        ));
+        assert!(!sends_back(
+            &verdict_with("verified", true, nothing.clone()),
+            true
+        ));
         // Something wrote: the claim has evidence to be judged against.
-        assert!(!sends_back(&verdict_with("unverified", true, Evidence { writes: 1, ..Evidence::default() }), true));
+        assert!(!sends_back(
+            &verdict_with(
+                "unverified",
+                true,
+                Evidence {
+                    writes: 1,
+                    ..Evidence::default()
+                }
+            ),
+            true
+        ));
         // A person declined a call: the agent stopped as told; never sent back.
-        assert!(!sends_back(&verdict_with("failed", true, Evidence { declined: 1, ..Evidence::default() }), true));
+        assert!(!sends_back(
+            &verdict_with(
+                "failed",
+                true,
+                Evidence {
+                    declined: 1,
+                    ..Evidence::default()
+                }
+            ),
+            true
+        ));
     }
 
     #[tokio::test]
@@ -941,11 +1192,18 @@ mod tests {
     fn an_idempotent_write_that_took_effect_is_a_write() {
         let turn = vec![
             ChatMessage::user("my office is 2A"),
-            ChatMessage::assistant_tool_calls(vec![ToolCall::new("m", "memory.remember", json!({"text": "My office is 2A."}))]),
+            ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                "m",
+                "memory.remember",
+                json!({"text": "My office is 2A."}),
+            )]),
             ChatMessage::tool_result("m", r#"{"remembered":"My office is 2A.","new":true}"#),
             ChatMessage::assistant("Noted."),
         ];
-        let catalog = vec![capability("memory.remember", Effect::Idempotent), capability("read", Effect::ReadOnly)];
+        let catalog = vec![
+            capability("memory.remember", Effect::Idempotent),
+            capability("read", Effect::ReadOnly),
+        ];
         let evidence = turn_evidence(&turn, &catalog);
         assert_eq!(evidence.calls[0].effect, "idempotent");
         assert_eq!((evidence.writes, evidence.succeeded), (1, 1));
@@ -961,7 +1219,10 @@ mod tests {
 
     #[test]
     fn remembered_notes_are_shown_identifiers_and_ride_the_transcript() {
-        use rusty_agent_runtime::memory::{MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress, ValidityWindow};
+        use rusty_agent_runtime::memory::{
+            MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ProvenanceAuthor,
+            ScopeAddress, ValidityWindow,
+        };
         let now = chrono::Utc::now();
         let note = MemoryRecord::new(
             MemoryKind::Fact,
@@ -975,14 +1236,29 @@ mod tests {
         .unwrap();
         let names = std::collections::HashMap::from([("clerk".to_owned(), "Clerk".to_owned())]);
         let remembered = remembered_message(std::slice::from_ref(&note), &names).unwrap();
-        assert!(remembered.content.as_deref().unwrap().contains("INC0010001"));
-        assert!(remembered.content.as_deref().unwrap().contains("written by Clerk (agent clerk)"));
-        assert!(remembered_message(&[note], &Default::default()).unwrap().content.as_deref().unwrap().contains("written by agent clerk"));
+        assert!(remembered
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("INC0010001"));
+        assert!(remembered
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("written by Clerk (agent clerk)"));
+        assert!(remembered_message(&[note], &Default::default())
+            .unwrap()
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("written by agent clerk"));
         let messages = vec![
             ChatMessage::system("You are the desk."),
             ChatMessage::user("What did the clerk find?"),
             remembered,
-            ChatMessage::assistant("From memory (the clerk's report): the oldest open incident is INC0010001."),
+            ChatMessage::assistant(
+                "From memory (the clerk's report): the oldest open incident is INC0010001.",
+            ),
         ];
         // The number came from a note, not from nowhere.
         assert!(unshown_identifiers(&messages, Some("You are the desk.")).is_empty());
@@ -1015,7 +1291,10 @@ mod tests {
             ChatMessage::assistant_tool_calls(vec![ToolCall::new("d", "mystery", json!({}))]),
             ChatMessage::assistant("done"),
         ];
-        let catalog = vec![capability("read", Effect::ReadOnly), capability("send", Effect::NonIdempotent)];
+        let catalog = vec![
+            capability("read", Effect::ReadOnly),
+            capability("send", Effect::NonIdempotent),
+        ];
         let evidence = turn_evidence(&messages, &catalog);
         let outcomes: Vec<(&str, &str, &str)> = evidence
             .calls
@@ -1031,7 +1310,10 @@ mod tests {
                 ("mystery", "unknown", "unanswered"),
             ]
         );
-        assert_eq!((evidence.writes, evidence.refused, evidence.unanswered), (0, 1, 1));
+        assert_eq!(
+            (evidence.writes, evidence.refused, evidence.unanswered),
+            (0, 1, 1)
+        );
         assert_eq!((evidence.succeeded, evidence.errors), (1, 1));
     }
 

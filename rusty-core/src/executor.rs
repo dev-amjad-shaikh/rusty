@@ -504,9 +504,8 @@ impl RunConfig {
 
     /// Builder-style: the skills the agent follows this run.
     pub fn with_skills(mut self, skills: &[crate::context::SkillSectionEntry]) -> Self {
-        self.skills = Some(
-            serde_json::to_value(skills).expect("skill section entries are plain data"),
-        );
+        self.skills =
+            Some(serde_json::to_value(skills).expect("skill section entries are plain data"));
         self
     }
 
@@ -532,9 +531,8 @@ impl RunConfig {
         mut self,
         overlays: &std::collections::BTreeMap<String, crate::tool_select::ToolSelectionOverlay>,
     ) -> Self {
-        self.tool_overlays = Some(
-            serde_json::to_value(overlays).expect("tool selection overlays are plain data"),
-        );
+        self.tool_overlays =
+            Some(serde_json::to_value(overlays).expect("tool selection overlays are plain data"));
         self
     }
 
@@ -544,9 +542,8 @@ impl RunConfig {
         mut self,
         outcomes: &std::collections::BTreeMap<String, crate::tool_select::ToolOutcomeStats>,
     ) -> Self {
-        self.tool_outcomes = Some(
-            serde_json::to_value(outcomes).expect("tool outcome stats are plain data"),
-        );
+        self.tool_outcomes =
+            Some(serde_json::to_value(outcomes).expect("tool outcome stats are plain data"));
         self
     }
 
@@ -1234,7 +1231,12 @@ impl Executor {
                 counterpart: config.counterpart.as_ref().map(|c| c.to_value()),
                 agent_id: config.agent_id.clone(),
                 started_at,
-                world: config.execution.as_ref().and_then(|e| e.get("world")).and_then(Value::as_str).map(str::to_owned),
+                world: config
+                    .execution
+                    .as_ref()
+                    .and_then(|e| e.get("world"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             };
             recorder.record(
                 EventDraft::new(RunEventKind::RunConfigDeclared, Effect::Pure).output(
@@ -1303,7 +1305,11 @@ impl Executor {
                 }
             };
             if let Some(halt) = ceiling {
-                let reason = halt.get("reason").and_then(Value::as_str).unwrap_or("ceiling").to_owned();
+                let reason = halt
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("ceiling")
+                    .to_owned();
                 let mut checkpoint_id = String::new();
                 if let Some(checkpointer) = &self.checkpointer {
                     let stamp = config.inbox.as_ref().and_then(|inbox| inbox.snapshot());
@@ -1660,19 +1666,31 @@ impl Executor {
                 );
             }
             if let Some(model) = &config.model {
-                extra.insert(crate::react::MODEL_KEY.to_owned(), Value::String(model.clone()));
+                extra.insert(
+                    crate::react::MODEL_KEY.to_owned(),
+                    Value::String(model.clone()),
+                );
             }
             if let Some(model) = &config.fallback_model {
-                extra.insert(crate::react::FALLBACK_KEY.to_owned(), Value::String(model.clone()));
+                extra.insert(
+                    crate::react::FALLBACK_KEY.to_owned(),
+                    Value::String(model.clone()),
+                );
             }
             if let Some(t) = config.temperature {
-                extra.insert(crate::react::TEMPERATURE_KEY.to_owned(), serde_json::json!(t));
+                extra.insert(
+                    crate::react::TEMPERATURE_KEY.to_owned(),
+                    serde_json::json!(t),
+                );
             }
             if let Some(policy) = &config.context_policy {
                 extra.insert(crate::react::CONTEXT_POLICY_KEY.to_owned(), policy.clone());
             }
             if config.compaction_state {
-                extra.insert(crate::react::COMPACTION_STATE_KEY.to_owned(), Value::Bool(true));
+                extra.insert(
+                    crate::react::COMPACTION_STATE_KEY.to_owned(),
+                    Value::Bool(true),
+                );
             }
             if let Some(skills) = &config.skills {
                 extra.insert(crate::react::SKILLS_KEY.to_owned(), skills.clone());
@@ -1686,19 +1704,31 @@ impl Executor {
             // Who the run is for and which agent it is of, for the tools a
             // node dispatches (the run context).
             if let Some(attribution) = &config.attribution {
-                extra.insert(crate::react::ATTRIBUTION_KEY.to_owned(), attribution.clone());
+                extra.insert(
+                    crate::react::ATTRIBUTION_KEY.to_owned(),
+                    attribution.clone(),
+                );
             }
             if let Some(execution) = &config.execution {
                 extra.insert(crate::react::EXECUTION_KEY.to_owned(), execution.clone());
             }
             if let Some(agent_id) = &config.agent_id {
-                extra.insert(crate::react::AGENT_ID_KEY.to_owned(), Value::String(agent_id.clone()));
+                extra.insert(
+                    crate::react::AGENT_ID_KEY.to_owned(),
+                    Value::String(agent_id.clone()),
+                );
             }
             if let Some(counterpart) = &config.counterpart {
-                extra.insert(crate::react::COUNTERPART_KEY.to_owned(), counterpart.to_value());
+                extra.insert(
+                    crate::react::COUNTERPART_KEY.to_owned(),
+                    counterpart.to_value(),
+                );
             }
             if let Some(blocks) = &config.memory_blocks {
-                extra.insert(crate::react::MEMORY_BLOCKS_KEY.to_owned(), Value::String(blocks.clone()));
+                extra.insert(
+                    crate::react::MEMORY_BLOCKS_KEY.to_owned(),
+                    Value::String(blocks.clone()),
+                );
             }
             if let Some(started_at) = started_at {
                 extra.insert(

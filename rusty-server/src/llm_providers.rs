@@ -13,7 +13,9 @@ use axum::extract::{Path, State as AxumState};
 use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::broker::SealedCredential;
-use rusty_agent_runtime::llm::{ChatMessage, ChatModel, FallbackChatModel, ModelPricing, OpenAiCompatibleClient};
+use rusty_agent_runtime::llm::{
+    ChatMessage, ChatModel, FallbackChatModel, ModelPricing, OpenAiCompatibleClient,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -118,11 +120,21 @@ struct EnvProvider {
 }
 
 fn env_provider(prefix: &str) -> Option<EnvProvider> {
-    let var = |suffix: &str| std::env::var(format!("{prefix}{suffix}")).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+    let var = |suffix: &str| {
+        std::env::var(format!("{prefix}{suffix}"))
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
     let base_url = var("BASE_URL")?;
     let model = var("MODEL")?;
-    let extra_body = var("EXTRA_BODY").and_then(|raw| serde_json::from_str::<serde_json::Map<String, Value>>(&raw).ok());
-    let price = |suffix: &str| var(suffix).and_then(|v| v.parse::<f64>().ok()).filter(|v| *v >= 0.0);
+    let extra_body = var("EXTRA_BODY")
+        .and_then(|raw| serde_json::from_str::<serde_json::Map<String, Value>>(&raw).ok());
+    let price = |suffix: &str| {
+        var(suffix)
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v >= 0.0)
+    };
     Some(EnvProvider {
         name: var("NAME").unwrap_or_else(|| name_from(&base_url)),
         base_url,
@@ -143,7 +155,11 @@ async fn seal_key(state: &AppState, id: &str, key: &str) -> Result<SealedCredent
         .map_err(|e| format!("the key could not be sealed: {e}"))
 }
 
-async fn record_from_env(state: &AppState, env: EnvProvider, taken: &[String]) -> Result<ProviderRecord, String> {
+async fn record_from_env(
+    state: &AppState,
+    env: EnvProvider,
+    taken: &[String],
+) -> Result<ProviderRecord, String> {
     let mut id = slug(&env.name);
     if id.is_empty() {
         id = "provider".to_owned();
@@ -180,7 +196,12 @@ async fn config_from_env(state: &AppState) -> Result<Option<LlmConfig>, String> 
         return Ok(None);
     };
     let primary = record_from_env(state, primary, &[]).await?;
-    let mut config = LlmConfig { primary: Some(primary.id.clone()), providers: vec![primary], fallback: None, updated_at: Some(Utc::now()) };
+    let mut config = LlmConfig {
+        primary: Some(primary.id.clone()),
+        providers: vec![primary],
+        fallback: None,
+        updated_at: Some(Utc::now()),
+    };
     if let Some(fallback) = env_provider("RUSTY_LLM_FALLBACK_") {
         let taken: Vec<String> = config.providers.iter().map(|p| p.id.clone()).collect();
         let fallback = record_from_env(state, fallback, &taken).await?;
@@ -191,7 +212,10 @@ async fn config_from_env(state: &AppState) -> Result<Option<LlmConfig>, String> 
 }
 
 /// The client for one provider, its key opened for this process only.
-async fn client_for(state: &AppState, p: &ProviderRecord) -> Result<OpenAiCompatibleClient, String> {
+async fn client_for(
+    state: &AppState,
+    p: &ProviderRecord,
+) -> Result<OpenAiCompatibleClient, String> {
     let key = match &p.api_key {
         Some(envelope) => {
             let bytes = state
@@ -199,7 +223,10 @@ async fn client_for(state: &AppState, p: &ProviderRecord) -> Result<OpenAiCompat
                 .open_connector_secret(&owner(&p.id), envelope)
                 .await
                 .map_err(|e| format!("the key of `{}` could not be opened: {e}", p.id))?;
-            Some(String::from_utf8(bytes).map_err(|_| format!("the key of `{}` is not text", p.id))?)
+            Some(
+                String::from_utf8(bytes)
+                    .map_err(|_| format!("the key of `{}` is not text", p.id))?,
+            )
         }
         None => None,
     };
@@ -223,21 +250,38 @@ fn label_of(p: &ProviderRecord) -> String {
 
 /// The model the configuration describes: the primary, with the fallback
 /// behind it when one is named. `None` when nothing is primary.
-pub(crate) async fn build_model(state: &AppState, config: &LlmConfig) -> Result<Option<(Arc<dyn ChatModel>, String)>, String> {
+pub(crate) async fn build_model(
+    state: &AppState,
+    config: &LlmConfig,
+) -> Result<Option<(Arc<dyn ChatModel>, String)>, String> {
     let Some(primary_id) = &config.primary else {
         return Ok(None);
     };
-    let primary = config.provider(primary_id).ok_or_else(|| format!("primary `{primary_id}` is not among the providers"))?;
+    let primary = config
+        .provider(primary_id)
+        .ok_or_else(|| format!("primary `{primary_id}` is not among the providers"))?;
     let primary_client: Arc<dyn ChatModel> = Arc::new(client_for(state, primary).await?);
     let fallback = match &config.fallback {
-        Some(id) if id != primary_id => Some(config.provider(id).ok_or_else(|| format!("fallback `{id}` is not among the providers"))?),
+        Some(id) if id != primary_id => Some(
+            config
+                .provider(id)
+                .ok_or_else(|| format!("fallback `{id}` is not among the providers"))?,
+        ),
         _ => None,
     };
     match fallback {
         Some(f) => {
             let fallback_client: Arc<dyn ChatModel> = Arc::new(client_for(state, f).await?);
-            let model = FallbackChatModel::new(primary_client, label_of(primary), fallback_client, label_of(f));
-            Ok(Some((Arc::new(model), format!("{}, falling back to {}", label_of(primary), label_of(f)))))
+            let model = FallbackChatModel::new(
+                primary_client,
+                label_of(primary),
+                fallback_client,
+                label_of(f),
+            );
+            Ok(Some((
+                Arc::new(model),
+                format!("{}, falling back to {}", label_of(primary), label_of(f)),
+            )))
         }
         None => Ok(Some((primary_client, label_of(primary)))),
     }
@@ -245,14 +289,30 @@ pub(crate) async fn build_model(state: &AppState, config: &LlmConfig) -> Result<
 
 /// One provider as a run would call it: the client, with the deployment's
 /// fallback behind it when the fallback is another provider.
-async fn model_for(state: &AppState, config: &LlmConfig, id: &str) -> Result<(Arc<dyn ChatModel>, String), String> {
-    let p = config.provider(id).ok_or_else(|| format!("`{id}` is not among the providers"))?;
+async fn model_for(
+    state: &AppState,
+    config: &LlmConfig,
+    id: &str,
+) -> Result<(Arc<dyn ChatModel>, String), String> {
+    let p = config
+        .provider(id)
+        .ok_or_else(|| format!("`{id}` is not among the providers"))?;
     let client: Arc<dyn ChatModel> = Arc::new(client_for(state, p).await?);
     match &config.fallback {
         Some(f) if f != id => {
-            let fp = config.provider(f).ok_or_else(|| format!("fallback `{f}` is not among the providers"))?;
+            let fp = config
+                .provider(f)
+                .ok_or_else(|| format!("fallback `{f}` is not among the providers"))?;
             let fallback_client: Arc<dyn ChatModel> = Arc::new(client_for(state, fp).await?);
-            Ok((Arc::new(FallbackChatModel::new(client, label_of(p), fallback_client, label_of(fp))), format!("{}, falling back to {}", label_of(p), label_of(fp))))
+            Ok((
+                Arc::new(FallbackChatModel::new(
+                    client,
+                    label_of(p),
+                    fallback_client,
+                    label_of(fp),
+                )),
+                format!("{}, falling back to {}", label_of(p), label_of(fp)),
+            ))
         }
         _ => Ok((client, label_of(p))),
     }
@@ -263,7 +323,9 @@ async fn model_for(state: &AppState, config: &LlmConfig, id: &str) -> Result<(Ar
 /// agent that names it.
 pub(crate) async fn apply(state: &AppState, config: &LlmConfig) -> Result<String, String> {
     let Some(handle) = &state.model_handle else {
-        return Err("this server's model is fixed at boot; it holds no swappable handle".to_owned());
+        return Err(
+            "this server's model is fixed at boot; it holds no swappable handle".to_owned(),
+        );
     };
     match build_model(state, config).await? {
         Some((model, label)) => {
@@ -273,7 +335,9 @@ pub(crate) async fn apply(state: &AppState, config: &LlmConfig) -> Result<String
             for p in &config.providers {
                 match model_for(state, config, &p.id).await {
                     Ok((m, l)) => handle.set_named(p.id.clone(), m, l),
-                    Err(e) => tracing::warn!(id = %p.id, %e, "provider not available as an agent's model"),
+                    Err(e) => {
+                        tracing::warn!(id = %p.id, %e, "provider not available as an agent's model")
+                    }
                 }
                 // Bare as well, for an agent that pairs it with its own fallback.
                 match client_for(state, p).await {
@@ -309,7 +373,10 @@ pub(crate) fn restore(state: Arc<AppState>) {
                     if let Err(error) = state.server_store.put_llm_config(&config).await {
                         tracing::warn!(%error, "model providers: seeded from the environment but not stored");
                     } else {
-                        tracing::info!(providers = config.providers.len(), "model providers seeded from the environment");
+                        tracing::info!(
+                            providers = config.providers.len(),
+                            "model providers seeded from the environment"
+                        );
                     }
                     config
                 }
@@ -354,8 +421,18 @@ pub(crate) fn served(config: &LlmConfig, state: &AppState) -> Value {
 
 /// What `/info` says about the models: enough to name them, never a key.
 pub(crate) async fn info(state: &AppState) -> Value {
-    let config = state.server_store.get_llm_config().await.ok().flatten().unwrap_or_default();
-    let brief = |id: &Option<String>| id.as_ref().and_then(|id| config.provider(id)).map(|p| json!({"id": p.id, "name": p.name, "model": p.model}));
+    let config = state
+        .server_store
+        .get_llm_config()
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let brief = |id: &Option<String>| {
+        id.as_ref()
+            .and_then(|id| config.provider(id))
+            .map(|p| json!({"id": p.id, "name": p.name, "model": p.model}))
+    };
     json!({
         "primary": brief(&config.primary),
         "fallback": brief(&config.fallback),
@@ -439,28 +516,50 @@ pub(crate) async fn put_providers(
         .map_err(|e| ApiError::internal(format!("model providers: {e}")))?
         .unwrap_or_default();
     if payload.providers.is_empty() {
-        return Err(ApiError::bad_request("name at least one provider".to_owned()));
+        return Err(ApiError::bad_request(
+            "name at least one provider".to_owned(),
+        ));
     }
     let mut providers: Vec<ProviderRecord> = Vec::new();
     for p in &payload.providers {
         let name = p.name.trim();
         if name.is_empty() {
-            return Err(ApiError::bad_request("every provider needs a name".to_owned()));
+            return Err(ApiError::bad_request(
+                "every provider needs a name".to_owned(),
+            ));
         }
         let base_url = p.base_url.trim().trim_end_matches('/').to_owned();
         if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
-            return Err(ApiError::bad_request(format!("`{name}`: the API root must be an http(s) URL")));
+            return Err(ApiError::bad_request(format!(
+                "`{name}`: the API root must be an http(s) URL"
+            )));
         }
         if p.model.trim().is_empty() {
             return Err(ApiError::bad_request(format!("`{name}`: name the model")));
         }
-        let id = p.id.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(|| slug(name));
+        let id =
+            p.id.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| slug(name));
         if id.is_empty() || providers.iter().any(|q| q.id == id) {
-            return Err(ApiError::bad_request(format!("`{name}`: the id `{id}` is empty or taken")));
+            return Err(ApiError::bad_request(format!(
+                "`{name}`: the id `{id}` is empty or taken"
+            )));
         }
         let held = existing.provider(&id);
-        let api_key = match p.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(key) => Some(seal_key(&state, &id, key).await.map_err(ApiError::internal)?),
+        let api_key = match p
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(key) => Some(
+                seal_key(&state, &id, key)
+                    .await
+                    .map_err(ApiError::internal)?,
+            ),
             None => held.and_then(|h| h.api_key.clone()),
         };
         providers.push(ProviderRecord {
@@ -476,19 +575,34 @@ pub(crate) async fn put_providers(
             created_at: held.map(|h| h.created_at).unwrap_or_else(Utc::now),
         });
     }
-    let primary = payload.primary.clone().or_else(|| providers.first().map(|p| p.id.clone()));
+    let primary = payload
+        .primary
+        .clone()
+        .or_else(|| providers.first().map(|p| p.id.clone()));
     if let Some(id) = &primary {
         if !providers.iter().any(|p| &p.id == id) {
-            return Err(ApiError::bad_request(format!("primary `{id}` is not among the providers")));
+            return Err(ApiError::bad_request(format!(
+                "primary `{id}` is not among the providers"
+            )));
         }
     }
-    let fallback = payload.fallback.clone().filter(|id| Some(id) != primary.as_ref());
+    let fallback = payload
+        .fallback
+        .clone()
+        .filter(|id| Some(id) != primary.as_ref());
     if let Some(id) = &fallback {
         if !providers.iter().any(|p| &p.id == id) {
-            return Err(ApiError::bad_request(format!("fallback `{id}` is not among the providers")));
+            return Err(ApiError::bad_request(format!(
+                "fallback `{id}` is not among the providers"
+            )));
         }
     }
-    let config = LlmConfig { providers, primary, fallback, updated_at: Some(Utc::now()) };
+    let config = LlmConfig {
+        providers,
+        primary,
+        fallback,
+        updated_at: Some(Utc::now()),
+    };
     state
         .server_store
         .put_llm_config(&config)
@@ -516,10 +630,17 @@ pub(crate) async fn test_provider(
         .await
         .map_err(|e| ApiError::internal(format!("model providers: {e}")))?
         .unwrap_or_default();
-    let provider = config.provider(&id).ok_or_else(|| ApiError::not_found(format!("no provider `{id}`")))?;
-    let client = client_for(&state, provider).await.map_err(ApiError::internal)?;
+    let provider = config
+        .provider(&id)
+        .ok_or_else(|| ApiError::not_found(format!("no provider `{id}`")))?;
+    let client = client_for(&state, provider)
+        .await
+        .map_err(ApiError::internal)?;
     let started = std::time::Instant::now();
-    let messages = vec![ChatMessage::system("Answer with the single word: ok"), ChatMessage::user("Are you there?")];
+    let messages = vec![
+        ChatMessage::system("Answer with the single word: ok"),
+        ChatMessage::user("Are you there?"),
+    ];
     match client.chat(&messages, &[]).await {
         Ok(response) => Ok(Json(json!({
             "ok": true,
@@ -548,8 +669,12 @@ pub(crate) async fn run_usage(state: &AppState, run_id: &str) -> Value {
 }
 
 pub(crate) fn usage_of(events: &[rusty_agent_runtime::record::RunEvent]) -> Value {
-    let (mut prompt, mut cached, mut completion, mut calls, mut reported) = (0u64, 0u64, 0u64, 0u64, 0u64);
-    for event in events.iter().filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ModelCall) {
+    let (mut prompt, mut cached, mut completion, mut calls, mut reported) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    for event in events
+        .iter()
+        .filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ModelCall)
+    {
         calls += 1;
         if let Some(usage) = &event.tokens {
             prompt += usage.prompt_tokens;
@@ -579,11 +704,21 @@ pub(crate) async fn cache_stats(state: &AppState, runs: usize) -> Value {
     let Ok(mut journals) = state.server_store.list_journals().await else {
         return json!({});
     };
-    journals.sort_by(|a, b| b.events.first().map(|e| e.recorded_at).cmp(&a.events.first().map(|e| e.recorded_at)));
+    journals.sort_by(|a, b| {
+        b.events
+            .first()
+            .map(|e| e.recorded_at)
+            .cmp(&a.events.first().map(|e| e.recorded_at))
+    });
     journals.truncate(runs);
-    let mut per_model: std::collections::BTreeMap<String, (u64, u64, u64, u64)> = std::collections::BTreeMap::new();
+    let mut per_model: std::collections::BTreeMap<String, (u64, u64, u64, u64)> =
+        std::collections::BTreeMap::new();
     for snapshot in &journals {
-        for event in snapshot.events.iter().filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ModelCall) {
+        for event in snapshot
+            .events
+            .iter()
+            .filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ModelCall)
+        {
             let Some(usage) = &event.tokens else { continue };
             let model = crate::replay::resolve(snapshot, event.output.as_ref())
                 .and_then(|v| v.get("model").and_then(Value::as_str).map(str::to_owned))
@@ -618,10 +753,12 @@ mod tests {
 
     #[test]
     fn a_provider_is_named_from_its_host_and_slugged() {
-        assert_eq!(name_from("https://api.fireworks.ai/inference/v1"), "fireworks");
+        assert_eq!(
+            name_from("https://api.fireworks.ai/inference/v1"),
+            "fireworks"
+        );
         assert_eq!(name_from("http://100.123.104.44:8000/v1"), "104");
         assert_eq!(name_from("https://api.moonshot.ai/v1"), "moonshot");
         assert_eq!(slug("GPU box (Qwen)"), "gpu-box-qwen");
     }
 }
-

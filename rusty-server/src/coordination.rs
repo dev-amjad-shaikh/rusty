@@ -57,19 +57,19 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::agents::{
-    AgentId, COORDINATION_RESULT_KIND, CoordinationContract, CoordinationMessage,
-    CoordinationOutcome, CoordinationStatus, MemberDisposition, MemberSettlement, QuorumOutcome,
-    QuorumResolverRecord,
+    AgentId, CoordinationContract, CoordinationMessage, CoordinationOutcome, CoordinationStatus,
+    MemberDisposition, MemberSettlement, QuorumOutcome, QuorumResolverRecord,
+    COORDINATION_RESULT_KIND,
 };
 use rusty_agent_runtime::journal::{Clock, EventDraft, Journal};
 use rusty_agent_runtime::record::{Effect, EventStatus, PayloadRef, RunEventKind};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::TaskQuota;
 use crate::auth::TenantContext;
 use crate::server_store::{ServerStore, StoreResult};
 use crate::tasks::{self, TaskRecord};
+use crate::TaskQuota;
 
 /// The deterministic run id of a coordination's journal. Distinct from
 /// executor run ids (UUIDs) and from the supervision journals by

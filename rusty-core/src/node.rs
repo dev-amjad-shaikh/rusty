@@ -157,10 +157,15 @@ impl NodeContext {
     /// The run's approval gate (see the field). Admission, when attached,
     /// is the same boundary with more; either answers the approval question.
     pub fn approval_gate(&self) -> Option<&EffectAdmissionContext> {
-        self.effect_admission.as_ref().or(self.approval_gate.as_ref())
+        self.effect_admission
+            .as_ref()
+            .or(self.approval_gate.as_ref())
     }
 
-    pub(crate) fn with_optional_approval_gate(mut self, gate: Option<EffectAdmissionContext>) -> Self {
+    pub(crate) fn with_optional_approval_gate(
+        mut self,
+        gate: Option<EffectAdmissionContext>,
+    ) -> Self {
         self.approval_gate = gate;
         self
     }

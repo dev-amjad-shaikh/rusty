@@ -17,7 +17,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use rusty_agent_runtime::memory::{consolidation_summary, superseded_set, MemoryKind, MemoryRecord, ProvenanceAuthor, ScopeAddress};
+use rusty_agent_runtime::memory::{
+    consolidation_summary, superseded_set, MemoryKind, MemoryRecord, ProvenanceAuthor, ScopeAddress,
+};
 use rusty_agent_runtime::record::PayloadRef;
 use serde_json::{json, Value};
 
@@ -81,8 +83,10 @@ fn jaccard(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f64 {
 /// A note the pass may fold: written by an agent or an earlier pass, not a
 /// block, not a person's own words, not a correction.
 fn foldable(record: &MemoryRecord) -> bool {
-    matches!(record.provenance.author, ProvenanceAuthor::Agent { .. } | ProvenanceAuthor::Distiller { .. })
-        && !record.tags.iter().any(|t| t == "block")
+    matches!(
+        record.provenance.author,
+        ProvenanceAuthor::Agent { .. } | ProvenanceAuthor::Distiller { .. }
+    ) && !record.tags.iter().any(|t| t == "block")
         && record.provenance.evidence.correction_id.is_none()
         && matches!(record.kind, MemoryKind::Fact | MemoryKind::Summary)
         && note_text(record).is_some()
@@ -108,7 +112,10 @@ fn groups(live: &[&MemoryRecord]) -> Vec<(Vec<usize>, String)> {
             out.push((members, why));
         }
     }
-    let term_sets: Vec<BTreeSet<String>> = live.iter().map(|r| terms(&note_text(r).unwrap_or_default())).collect();
+    let term_sets: Vec<BTreeSet<String>> = live
+        .iter()
+        .map(|r| terms(&note_text(r).unwrap_or_default()))
+        .collect();
     for i in 0..live.len() {
         if taken[i] || term_sets[i].len() < 4 {
             continue;
@@ -126,7 +133,11 @@ fn groups(live: &[&MemoryRecord]) -> Vec<(Vec<usize>, String)> {
             for &m in &members {
                 taken[m] = true;
             }
-            let why = format!("{} notes that say the same thing (word overlap ≥ {:.0}%)", members.len(), NEAR_DUPLICATE_JACCARD * 100.0);
+            let why = format!(
+                "{} notes that say the same thing (word overlap ≥ {:.0}%)",
+                members.len(),
+                NEAR_DUPLICATE_JACCARD * 100.0
+            );
             out.push((members, why));
         }
     }
@@ -136,43 +147,85 @@ fn groups(live: &[&MemoryRecord]) -> Vec<(Vec<usize>, String)> {
 /// Whether the pass is due: no pass yet, or enough live notes newer than
 /// the last one.
 fn due(universe: &[MemoryRecord], last: Option<DateTime<Utc>>) -> (bool, usize) {
-    let Some(last) = last else { return (true, universe.len()) };
+    let Some(last) = last else {
+        return (true, universe.len());
+    };
     let new = universe.iter().filter(|r| r.created_at > last).count();
     (new >= DUE_AFTER_NEW_NOTES, new)
 }
 
 /// Run the pass over every scope the tenant holds.
-pub(crate) async fn consolidate(state: &AppState, force: bool) -> Result<ConsolidationReport, String> {
+pub(crate) async fn consolidate(
+    state: &AppState,
+    force: bool,
+) -> Result<ConsolidationReport, String> {
     let tenant = TenantContext::new(crate::auth::DEFAULT_TENANT.to_owned(), Vec::new());
     let now = Utc::now();
-    let universe = crate::routes::memory_universe(state, &tenant).await.map_err(|e| format!("{e:?}"))?;
+    let universe = crate::routes::memory_universe(state, &tenant)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
     let last = load(state).and_then(|r| r.stamp);
     let (is_due, new_notes_seen) = due(&universe, last);
     if !is_due && !force {
-        let report = ConsolidationReport { stamp: last, folded: Vec::new(), skipped: true, new_notes_seen };
+        let report = ConsolidationReport {
+            stamp: last,
+            folded: Vec::new(),
+            skipped: true,
+            new_notes_seen,
+        };
         return Ok(report);
     }
     let superseded = superseded_set(&universe);
     let mut by_scope: BTreeMap<String, Vec<&MemoryRecord>> = BTreeMap::new();
     for r in &universe {
-        let live = !superseded.contains(r.memory_id.as_str()) && r.expires_at.is_none_or(|e| e > now);
+        let live =
+            !superseded.contains(r.memory_id.as_str()) && r.expires_at.is_none_or(|e| e > now);
         if live && foldable(r) {
             by_scope.entry(r.scope.as_address()).or_default().push(r);
         }
     }
-    let mut report = ConsolidationReport { stamp: Some(now), folded: Vec::new(), skipped: false, new_notes_seen };
+    let mut report = ConsolidationReport {
+        stamp: Some(now),
+        folded: Vec::new(),
+        skipped: false,
+        new_notes_seen,
+    };
     for (_, mut live) in by_scope {
-        live.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.memory_id.cmp(&b.memory_id)));
+        live.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.memory_id.cmp(&b.memory_id))
+        });
         for (members, why) in groups(&live) {
             let sources: Vec<MemoryRecord> = members.iter().map(|&i| live[i].clone()).collect();
-            let newest = sources.iter().max_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.memory_id.cmp(&b.memory_id))).expect("non-empty");
+            let newest = sources
+                .iter()
+                .max_by(|a, b| {
+                    a.created_at
+                        .cmp(&b.created_at)
+                        .then_with(|| a.memory_id.cmp(&b.memory_id))
+                })
+                .expect("non-empty");
             let text = note_text(newest).unwrap_or_default();
-            let key = sources.iter().filter_map(|r| r.key.clone()).next().or_else(|| newest.key.clone());
+            let key = sources
+                .iter()
+                .filter_map(|r| r.key.clone())
+                .next()
+                .or_else(|| newest.key.clone());
             let priority = sources.iter().map(|r| r.priority).max().unwrap_or(5);
-            let mut tags: Vec<String> = sources.iter().flat_map(|r| r.tags.iter().cloned()).collect();
+            let mut tags: Vec<String> = sources
+                .iter()
+                .flat_map(|r| r.tags.iter().cloned())
+                .collect();
             tags.sort();
             tags.dedup();
-            let mut summary = match consolidation_summary(newest.scope.clone(), DISTILLER, &sources, json!({ "text": text }), now) {
+            let mut summary = match consolidation_summary(
+                newest.scope.clone(),
+                DISTILLER,
+                &sources,
+                json!({ "text": text }),
+                now,
+            ) {
                 Ok(s) => s,
                 Err(error) => {
                     tracing::warn!(%error, "a consolidation group was not folded");
@@ -184,7 +237,11 @@ pub(crate) async fn consolidate(state: &AppState, force: bool) -> Result<Consoli
             if let Some(k) = &key {
                 summary = summary.with_key(k.clone());
             }
-            if let Err(error) = state.server_store.put_memory(tenant.tenant(), &summary, &json!({ "text": text })).await {
+            if let Err(error) = state
+                .server_store
+                .put_memory(tenant.tenant(), &summary, &json!({ "text": text }))
+                .await
+            {
                 tracing::warn!(%error, "consolidation summary not written");
                 continue;
             }
@@ -197,8 +254,14 @@ pub(crate) async fn consolidate(state: &AppState, force: bool) -> Result<Consoli
             });
         }
     }
-    crate::connectors::persist_json(&state.config.store_path, REPORT_KEY, &report).await.map_err(|e| e.to_string())?;
-    tracing::info!(groups = report.folded.len(), new_notes = new_notes_seen, "memory consolidation pass done");
+    crate::connectors::persist_json(&state.config.store_path, REPORT_KEY, &report)
+        .await
+        .map_err(|e| e.to_string())?;
+    tracing::info!(
+        groups = report.folded.len(),
+        new_notes = new_notes_seen,
+        "memory consolidation pass done"
+    );
     Ok(report)
 }
 

@@ -124,13 +124,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::agents::StateScope;
 use crate::error::{Result, RustyError};
 use crate::journal::{EventDraft, Journal, JournalSnapshot};
 use crate::record::{
-    ArtifactRef, Effect, INLINE_PAYLOAD_MAX_BYTES, PayloadRef, RunEvent, RunEventKind, sha256_hex,
+    sha256_hex, ArtifactRef, Effect, PayloadRef, RunEvent, RunEventKind, INLINE_PAYLOAD_MAX_BYTES,
 };
 use crate::replay::ServedEffect;
 

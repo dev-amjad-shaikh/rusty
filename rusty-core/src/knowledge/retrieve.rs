@@ -219,7 +219,10 @@ pub struct Citation {
 
     /// The source's class: the organization's own, a vendor's, or generic —
     /// what decides when sources disagree. Absent on the wire for the default.
-    #[serde(default, skip_serializing_if = "crate::knowledge::SourceProvenance::is_default")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::knowledge::SourceProvenance::is_default"
+    )]
     pub provenance: crate::knowledge::SourceProvenance,
 }
 

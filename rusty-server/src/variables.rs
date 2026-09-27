@@ -12,7 +12,10 @@ pub fn run_variables(
 ) -> std::collections::BTreeMap<String, String> {
     let mut values = std::collections::BTreeMap::new();
     for v in assistant_variables(config) {
-        if let (Some(name), Some(value)) = (v.get("name").and_then(serde_json::Value::as_str), v.get("value").and_then(serde_json::Value::as_str)) {
+        if let (Some(name), Some(value)) = (
+            v.get("name").and_then(serde_json::Value::as_str),
+            v.get("value").and_then(serde_json::Value::as_str),
+        ) {
             values.insert(name.to_owned(), value.to_owned());
         }
     }
@@ -65,11 +68,18 @@ pub fn render_variables(text: &str, values: &std::collections::BTreeMap<String, 
 
 /// Render the placeholders in every string of a JSON value — a skills
 /// section, whose procedures are text.
-pub fn render_variables_in(value: &mut serde_json::Value, values: &std::collections::BTreeMap<String, String>) {
+pub fn render_variables_in(
+    value: &mut serde_json::Value,
+    values: &std::collections::BTreeMap<String, String>,
+) {
     match value {
         serde_json::Value::String(s) if s.contains("{{") => *s = render_variables(s, values),
-        serde_json::Value::Array(items) => items.iter_mut().for_each(|v| render_variables_in(v, values)),
-        serde_json::Value::Object(map) => map.values_mut().for_each(|v| render_variables_in(v, values)),
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .for_each(|v| render_variables_in(v, values)),
+        serde_json::Value::Object(map) => map
+            .values_mut()
+            .for_each(|v| render_variables_in(v, values)),
         _ => {}
     }
 }

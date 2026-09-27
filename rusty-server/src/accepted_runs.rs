@@ -51,11 +51,17 @@ pub(crate) fn dir(root: &Path) -> PathBuf {
 /// The person a run acts for — its subject, or whom it was started for,
 /// or who started it, when that is a user.
 pub(crate) fn person_of(record: &AcceptedRunRecord) -> Option<(String, String)> {
-    crate::routes::run_person(record.payload.metadata.as_ref()).map(|p| (record.tenant.clone(), p.to_owned()))
+    crate::routes::run_person(record.payload.metadata.as_ref())
+        .map(|p| (record.tenant.clone(), p.to_owned()))
 }
 
 /// Keep the record; a person's run is sealed under their key.
-pub(crate) async fn persist(root: &Path, record: &AcceptedRunRecord, vault: Option<&crate::vault::PersonVault>, person: Option<(&str, &str)>) -> io::Result<()> {
+pub(crate) async fn persist(
+    root: &Path,
+    record: &AcceptedRunRecord,
+    vault: Option<&crate::vault::PersonVault>,
+    person: Option<(&str, &str)>,
+) -> io::Result<()> {
     let dir = dir(root);
     tokio::fs::create_dir_all(&dir).await?;
     let bytes = crate::vault::record_bytes(vault, person, "run", &record.run_id, record)?;
@@ -69,7 +75,11 @@ pub(crate) async fn persist(root: &Path, record: &AcceptedRunRecord, vault: Opti
 /// server from before records were kept, or never.
 /// The record, or `None` when there is none — or when it is sealed for a
 /// person whose key this store does not hold.
-pub(crate) async fn load(root: &Path, run_id: &str, vault: Option<&crate::vault::PersonVault>) -> io::Result<Option<AcceptedRunRecord>> {
+pub(crate) async fn load(
+    root: &Path,
+    run_id: &str,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Option<AcceptedRunRecord>> {
     let path = dir(root).join(format!("{run_id}.json"));
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
@@ -80,7 +90,10 @@ pub(crate) async fn load(root: &Path, run_id: &str, vault: Option<&crate::vault:
 }
 
 /// Every readable record.
-pub(crate) async fn list(root: &Path, vault: Option<&crate::vault::PersonVault>) -> io::Result<Vec<AcceptedRunRecord>> {
+pub(crate) async fn list(
+    root: &Path,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Vec<AcceptedRunRecord>> {
     let mut entries = match tokio::fs::read_dir(dir(root)).await {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -93,7 +106,12 @@ pub(crate) async fn list(root: &Path, vault: Option<&crate::vault::PersonVault>)
             continue;
         }
         let bytes = tokio::fs::read(entry.path()).await?;
-        if let Ok(Some(record)) = crate::vault::record_from_bytes::<AcceptedRunRecord>(vault, "run", name.trim_end_matches(".json"), &bytes) {
+        if let Ok(Some(record)) = crate::vault::record_from_bytes::<AcceptedRunRecord>(
+            vault,
+            "run",
+            name.trim_end_matches(".json"),
+            &bytes,
+        ) {
             out.push(record);
         }
     }

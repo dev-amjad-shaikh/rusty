@@ -34,12 +34,19 @@ impl ChatModel for ScriptedModel {
             .unwrap()
             .pop_front()
             .ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
-        Ok(ChatResponse { message, model: Some("scripted".into()), usage: None })
+        Ok(ChatResponse {
+            message,
+            model: Some("scripted".into()),
+            usage: None,
+        })
     }
 }
 
 fn temp_store() -> PathBuf {
-    std::env::temp_dir().join(format!("rusty-server-context-policy-{}", uuid::Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "rusty-server-context-policy-{}",
+        uuid::Uuid::new_v4()
+    ))
 }
 
 fn app(policy: Option<ContextPolicy>) -> (Router, PathBuf) {
@@ -67,10 +74,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 /// One turn on a fresh thread, the way the studio sends it: the charter as
@@ -84,7 +98,13 @@ async fn one_turn(app: &Router) -> Vec<Value> {
         {"role": "system", "content": "CHARTER: greet briefly."},
         {"role": "user", "content": "hi"}
     ]}});
-    let (status, run) = call(app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(input)).await;
+    let (status, run) = call(
+        app,
+        "POST",
+        &format!("/threads/{thread_id}/runs/wait"),
+        Some(input),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{run}");
     let run_id = run["run_id"].as_str().unwrap().to_owned();
     let (status, body) = call(app, "GET", &format!("/runs/{run_id}/events"), None).await;
@@ -117,7 +137,10 @@ async fn with_a_policy_the_journaled_call_is_the_assembled_request() {
         "the section manifest rides in the journaled request: {messages:?}"
     );
     assert_eq!(
-        messages.iter().filter(|m| m["content"] == "CHARTER: greet briefly.").count(),
+        messages
+            .iter()
+            .filter(|m| m["content"] == "CHARTER: greet briefly.")
+            .count(),
         1,
         "the charter appears once"
     );
@@ -127,7 +150,11 @@ async fn with_a_policy_the_journaled_call_is_the_assembled_request() {
         .find(|e| e["kind"] == "run_config_declared")
         .expect("the run declares its config");
     let declaration = &declared["output"]["value"];
-    let declaration = if declaration.is_null() { &declared["output"] } else { declaration };
+    let declaration = if declaration.is_null() {
+        &declared["output"]
+    } else {
+        declaration
+    };
     assert_eq!(
         declaration["context_policy"]["schema_version"], "context-policy-v1",
         "the policy is declared evidence: {declaration}"
@@ -151,7 +178,9 @@ async fn without_a_policy_the_journaled_call_is_the_raw_request() {
 /// numbers so the form can show them as the default.
 #[tokio::test]
 async fn an_agents_own_context_is_the_policy_its_runs_declare() {
-    let (app, store) = app(Some(ContextPolicy::standard(32_000).with_memory_section(2_048)));
+    let (app, store) = app(Some(
+        ContextPolicy::standard(32_000).with_memory_section(2_048),
+    ));
     let (status, info) = call(&app, "GET", "/info", None).await;
     assert_eq!(status, StatusCode::OK, "{info}");
     assert_eq!(info["context"]["budget_tokens"], 32_000, "{info}");
@@ -174,16 +203,37 @@ async fn an_agents_own_context_is_the_policy_its_runs_declare() {
         let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
         let (status, run) = call(app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(json!({"assistant_id": assistant, "input": {MESSAGES_CHANNEL: [{"role": "user", "content": "hi"}]}}))).await;
         assert_eq!(status, StatusCode::OK, "{run}");
-        let (_, body) = call(app, "GET", &format!("/runs/{}/events", run["run_id"].as_str().unwrap()), None).await;
-        let declared = body["events"].as_array().unwrap().iter().find(|e| e["kind"] == "run_config_declared").cloned().expect("declared");
+        let (_, body) = call(
+            app,
+            "GET",
+            &format!("/runs/{}/events", run["run_id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+        let declared = body["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == "run_config_declared")
+            .cloned()
+            .expect("declared");
         declared["output"]["value"]["context_policy"].clone()
     }
     let lean = declared_for(&app, "lean").await;
-    assert_eq!(lean["budget"]["max_tokens"], 8_000, "the agent's window: {lean}");
+    assert_eq!(
+        lean["budget"]["max_tokens"], 8_000,
+        "the agent's window: {lean}"
+    );
     assert_eq!(lean["compaction"]["keep_recent_messages"], 3, "{lean}");
-    assert!(lean["memory"].is_object(), "the deployment's memory section stays: {lean}");
+    assert!(
+        lean["memory"].is_object(),
+        "the deployment's memory section stays: {lean}"
+    );
     let plain = declared_for(&app, "plain").await;
-    assert_eq!(plain["budget"]["max_tokens"], 32_000, "the deployment's: {plain}");
+    assert_eq!(
+        plain["budget"]["max_tokens"], 32_000,
+        "the deployment's: {plain}"
+    );
     assert_eq!(plain["compaction"]["keep_recent_messages"], 8);
     let _ = std::fs::remove_dir_all(store);
 }

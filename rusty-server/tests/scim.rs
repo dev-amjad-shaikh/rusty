@@ -21,7 +21,11 @@ struct Brief;
 #[async_trait::async_trait]
 impl ChatModel for Brief {
     async fn chat(&self, _m: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("noted"), model: Some("brief".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("noted"),
+            model: Some("brief".into()),
+            usage: None,
+        })
     }
 }
 
@@ -30,14 +34,31 @@ fn app(store: &std::path::Path) -> Router {
     let graph = create_react_agent(Arc::new(Brief), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf())
         .with_public_url("http://127.0.0.1:8100")
-        .with_principal("default", Principal { id: "ada".into(), name: "ada".into(), kind: PrincipalKind::User, roles: vec![Role::Admin] }, "ada-key");
+        .with_principal(
+            "default",
+            Principal {
+                id: "ada".into(),
+                name: "ada".into(),
+                kind: PrincipalKind::User,
+                roles: vec![Role::Admin],
+            },
+            "ada-key",
+        );
     router(registry, config)
 }
 
-async fn call(app: &Router, method: &str, uri: &str, headers: &[(&str, &str)], body: Option<Value>) -> (StatusCode, axum::http::HeaderMap, Value) {
+async fn call(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: Option<Value>,
+) -> (StatusCode, axum::http::HeaderMap, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
     for (k, v) in headers {
         builder = builder.header(*k, *v);
@@ -49,11 +70,20 @@ async fn call(app: &Router, method: &str, uri: &str, headers: &[(&str, &str)], b
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned())) };
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
     (status, headers, value)
 }
 
@@ -65,9 +95,19 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
 
     // No token yet: the directory is refused with a SCIM error; the
     // administrator mints one and sees it once.
-    let (status, _, refused) = call(&app, "GET", "/scim/v2/Users", &[("authorization", "Bearer nothing")], None).await;
+    let (status, _, refused) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users",
+        &[("authorization", "Bearer nothing")],
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(refused["schemas"][0], "urn:ietf:params:scim:api:messages:2.0:Error", "{refused}");
+    assert_eq!(
+        refused["schemas"][0], "urn:ietf:params:scim:api:messages:2.0:Error",
+        "{refused}"
+    );
     let (status, _, minted) = call(&app, "POST", "/auth/scim/token", &admin, None).await;
     assert_eq!(status, StatusCode::OK, "{minted}");
     let token = minted["token"].as_str().unwrap().to_owned();
@@ -75,16 +115,36 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
     assert_eq!(minted["base_url"], "http://127.0.0.1:8100/scim/v2");
     let (_, _, shown) = call(&app, "GET", "/auth/scim", &admin, None).await;
     assert_eq!(shown["has_token"], true);
-    assert!(shown.get("token").is_none(), "the token is shown once: {shown}");
+    assert!(
+        shown.get("token").is_none(),
+        "the token is shown once: {shown}"
+    );
     let bearer = format!("Bearer {token}");
     let directory = [("authorization", bearer.as_str())];
-    let (status, _, _) = call(&app, "GET", "/scim/v2/Users", &[("authorization", "Bearer scim_wrong")], None).await;
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users",
+        &[("authorization", "Bearer scim_wrong")],
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // Discovery, as a directory reads it before it starts.
-    let (status, headers, spc) = call(&app, "GET", "/scim/v2/ServiceProviderConfig", &directory, None).await;
+    let (status, headers, spc) = call(
+        &app,
+        "GET",
+        "/scim/v2/ServiceProviderConfig",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{spc}");
-    assert_eq!(headers.get("content-type").unwrap().to_str().unwrap(), "application/scim+json");
+    assert_eq!(
+        headers.get("content-type").unwrap().to_str().unwrap(),
+        "application/scim+json"
+    );
     assert_eq!(spc["patch"]["supported"], true);
     let (_, _, types) = call(&app, "GET", "/scim/v2/ResourceTypes", &directory, None).await;
     assert_eq!(types["totalResults"], 2);
@@ -105,19 +165,49 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
     assert_eq!(priya["externalId"], "00u-priya");
     assert_eq!(priya["name"]["formatted"], "Priya Natarajan");
     assert_eq!(priya["active"], true);
-    assert_eq!(priya["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"], json!(["builder"]));
+    assert_eq!(
+        priya["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"],
+        json!(["builder"])
+    );
     // Looked up the way a directory does before creating twice.
-    let (_, _, found) = call(&app, "GET", "/scim/v2/Users?filter=userName%20eq%20%22priya%40example.com%22", &directory, None).await;
+    let (_, _, found) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users?filter=userName%20eq%20%22priya%40example.com%22",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(found["totalResults"], 1, "{found}");
     assert_eq!(found["Resources"][0]["id"], "priya@example.com");
-    let (_, _, by_ext) = call(&app, "GET", "/scim/v2/Users?filter=externalId%20eq%20%2200u-priya%22", &directory, None).await;
+    let (_, _, by_ext) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users?filter=externalId%20eq%20%2200u-priya%22",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(by_ext["totalResults"], 1);
-    let (status, _, bad) = call(&app, "GET", "/scim/v2/Users?filter=userName%20co%20%22pri%22", &directory, None).await;
+    let (status, _, bad) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users?filter=userName%20co%20%22pri%22",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
     assert_eq!(bad["scimType"], "invalidFilter");
     // Security → People sees the same account, with what the directory said.
     let (_, _, users) = call(&app, "GET", "/users", &admin, None).await;
-    let listed = users["users"].as_array().unwrap().iter().find(|u| u["id"] == "priya@example.com").cloned().unwrap();
+    let listed = users["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["id"] == "priya@example.com")
+        .cloned()
+        .unwrap();
     assert_eq!(listed["active"], true);
     assert_eq!(listed["external_id"], "00u-priya");
 
@@ -125,8 +215,19 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
     let (status, _, group) = call(&app, "POST", "/scim/v2/Groups", &directory, Some(json!({"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": "Rusty Admins", "members": [{"value": "priya@example.com"}]}))).await;
     assert_eq!(status, StatusCode::CREATED, "{group}");
     let group_id = group["id"].as_str().unwrap().to_owned();
-    let (_, _, after) = call(&app, "GET", "/scim/v2/Users/priya@example.com", &directory, None).await;
-    assert_eq!(after["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"], json!(["admin"]), "{after}");
+    let (_, _, after) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users/priya@example.com",
+        &directory,
+        None,
+    )
+    .await;
+    assert_eq!(
+        after["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"],
+        json!(["admin"]),
+        "{after}"
+    );
     // Moved to the builders' group: a builder again.
     let (_, _, builders) = call(&app, "POST", "/scim/v2/Groups", &directory, Some(json!({"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": "Rusty Builders"}))).await;
     let builders_id = builders["id"].as_str().unwrap().to_owned();
@@ -134,15 +235,32 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
     assert_eq!(status, StatusCode::OK);
     let (status, _, _) = call(&app, "PATCH", &format!("/scim/v2/Groups/{builders_id}"), &directory, Some(json!({"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "add", "path": "members", "value": [{"value": "priya@example.com"}]}]}))).await;
     assert_eq!(status, StatusCode::OK);
-    let (_, _, after) = call(&app, "GET", "/scim/v2/Users/priya@example.com", &directory, None).await;
-    assert_eq!(after["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"], json!(["builder"]), "{after}");
+    let (_, _, after) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users/priya@example.com",
+        &directory,
+        None,
+    )
+    .await;
+    assert_eq!(
+        after["urn:ietf:params:scim:schemas:extension:rusty:2.0:User"]["roles"],
+        json!(["builder"]),
+        "{after}"
+    );
 
     // Deactivation, the shape Entra sends: signed out everywhere, refused.
     let (status, _, patched) = call(&app, "PATCH", "/scim/v2/Users/priya@example.com", &directory, Some(json!({"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "Replace", "value": {"active": false}}]}))).await;
     assert_eq!(status, StatusCode::OK, "{patched}");
     assert_eq!(patched["active"], false);
     let (_, _, users) = call(&app, "GET", "/users", &admin, None).await;
-    let listed = users["users"].as_array().unwrap().iter().find(|u| u["id"] == "priya@example.com").cloned().unwrap();
+    let listed = users["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["id"] == "priya@example.com")
+        .cloned()
+        .unwrap();
     assert_eq!(listed["active"], false);
     let (_, _, config) = call(&app, "GET", "/auth/scim", &admin, None).await;
     assert_eq!(config["provisioned"], 1);
@@ -159,11 +277,32 @@ async fn the_directory_provisions_maps_groups_to_roles_deactivates_and_deletes_p
     assert_eq!(refused["scimType"], "mutability");
 
     // Deletion: the account goes, the groups drop her, the count moves.
-    let (status, _, _) = call(&app, "DELETE", "/scim/v2/Users/priya@example.com", &directory, None).await;
+    let (status, _, _) = call(
+        &app,
+        "DELETE",
+        "/scim/v2/Users/priya@example.com",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _, _) = call(&app, "GET", "/scim/v2/Users/priya@example.com", &directory, None).await;
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        "/scim/v2/Users/priya@example.com",
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (_, _, group) = call(&app, "GET", &format!("/scim/v2/Groups/{builders_id}"), &directory, None).await;
+    let (_, _, group) = call(
+        &app,
+        "GET",
+        &format!("/scim/v2/Groups/{builders_id}"),
+        &directory,
+        None,
+    )
+    .await;
     assert_eq!(group["members"].as_array().unwrap().len(), 0, "{group}");
     let (_, _, config) = call(&app, "GET", "/auth/scim", &admin, None).await;
     assert_eq!(config["deleted"], 1);

@@ -14,19 +14,36 @@ use tower::ServiceExt;
 
 fn app() -> (Router, PathBuf) {
     let store = std::env::temp_dir().join(format!("rusty-openapi-import-{}", uuid::Uuid::new_v4()));
-    (router(GraphRegistry::new(), ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())), store)
+    (
+        router(
+            GraphRegistry::new(),
+            ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()),
+        ),
+        store,
+    )
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
     let body = match body {
-        Some(value) => { builder = builder.header("content-type", "application/json"); Body::from(value.to_string()) }
+        Some(value) => {
+            builder = builder.header("content-type", "application/json");
+            Body::from(value.to_string())
+        }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes: Bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
     (status, value)
 }
 
@@ -54,21 +71,62 @@ async fn an_imported_write_reads_back_through_the_documents_own_read() {
         "documentation_url": "https://facilities.example.internal/docs", "base_url": "https://facilities.example.internal", "auth": "bearer", "spec": spec,
     }))).await;
     assert_eq!(status, StatusCode::OK, "{draft}");
-    let ops = draft["manifest"]["operations"].as_array().cloned().unwrap_or_default();
-    let create = ops.iter().find(|op| op["method"] == json!("POST") && op["path"] == json!("/tickets")).cloned().expect("the write was imported");
+    let ops = draft["manifest"]["operations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let create = ops
+        .iter()
+        .find(|op| op["method"] == json!("POST") && op["path"] == json!("/tickets"))
+        .cloned()
+        .expect("the write was imported");
     // The check is derived from the same path; the read-back is the document's own listing.
-    let read = ops.iter().find(|op| op["method"] == json!("GET") && op["path"] == json!("/tickets") && op["name"] != json!("check-connection")).cloned().expect("the read was imported");
-    assert_eq!(create["reconcile"]["operation"], read["name"], "the write reads back through the document's own read: {create}");
-    assert_eq!(create["reconcile"]["arguments"]["title"], json!("$title"), "bound to the write's natural key: {create}");
-    assert_eq!(create["reconcile"]["arguments"]["limit"], json!(5), "the read's limit held small: {create}");
-    let adopted = draft["read_backs"]["adopted"].as_array().cloned().unwrap_or_default();
+    let read = ops
+        .iter()
+        .find(|op| {
+            op["method"] == json!("GET")
+                && op["path"] == json!("/tickets")
+                && op["name"] != json!("check-connection")
+        })
+        .cloned()
+        .expect("the read was imported");
+    assert_eq!(
+        create["reconcile"]["operation"], read["name"],
+        "the write reads back through the document's own read: {create}"
+    );
+    assert_eq!(
+        create["reconcile"]["arguments"]["title"],
+        json!("$title"),
+        "bound to the write's natural key: {create}"
+    );
+    assert_eq!(
+        create["reconcile"]["arguments"]["limit"],
+        json!(5),
+        "the read's limit held small: {create}"
+    );
+    let adopted = draft["read_backs"]["adopted"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(adopted.len(), 1, "{draft}");
     assert_eq!(adopted[0]["write"], create["name"]);
-    let note = ops.iter().find(|op| op["path"] == json!("/notes")).cloned().expect("the note write");
-    assert!(note["reconcile"].is_null(), "a write with no read on its path keeps guessing: {note}");
-    assert_eq!(draft["read_backs"]["still_guessing"], json!([note["name"]]), "and the draft says so: {draft}");
+    let note = ops
+        .iter()
+        .find(|op| op["path"] == json!("/notes"))
+        .cloned()
+        .expect("the note write");
+    assert!(
+        note["reconcile"].is_null(),
+        "a write with no read on its path keeps guessing: {note}"
+    );
+    assert_eq!(
+        draft["read_backs"]["still_guessing"],
+        json!([note["name"]]),
+        "and the draft says so: {draft}"
+    );
     // The draft registers as it is: the read-back rides with the write.
-    let (status, receipt) = call(&app, "POST", "/connectors", Some(draft["manifest"].clone())).await;
+    let (status, receipt) =
+        call(&app, "POST", "/connectors", Some(draft["manifest"].clone())).await;
     assert_eq!(status, StatusCode::CREATED, "{receipt}");
     let _ = std::fs::remove_dir_all(store);
 }
@@ -80,29 +138,62 @@ async fn an_imported_write_reads_back_through_the_documents_own_read() {
 async fn a_large_api_is_chosen_from_and_a_public_one_asks_for_nothing() {
     let (app, store) = app();
     let mut paths = serde_json::Map::new();
-    paths.insert("/alerts".into(), json!({"get": {"operationId": "alerts", "summary": "Active weather alerts."}}));
+    paths.insert(
+        "/alerts".into(),
+        json!({"get": {"operationId": "alerts", "summary": "Active weather alerts."}}),
+    );
     for n in 0..70 {
         paths.insert(format!("/stations/{n}/{{id}}"), json!({"get": {"operationId": format!("station{n}"), "summary": "One station.", "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]}}));
     }
-    let spec = json!({"openapi": "3.0.0", "info": {"title": "Weather", "version": "1"}, "paths": paths});
+    let spec =
+        json!({"openapi": "3.0.0", "info": {"title": "Weather", "version": "1"}, "paths": paths});
     let draft_of = |ops: Option<Vec<&str>>| {
         let mut body = json!({"id": "weather", "display_name": "Weather", "description": "Weather.", "documentation_url": "https://weather.example/openapi.json", "base_url": "https://weather.example", "auth": "none", "spec": spec.clone()});
-        if let Some(ops) = ops { body["operations"] = json!(ops); }
+        if let Some(ops) = ops {
+            body["operations"] = json!(ops);
+        }
         body
     };
     let (status, draft) = call(&app, "POST", "/connectors/openapi", Some(draft_of(None))).await;
     assert_eq!(status, StatusCode::OK, "{draft}");
-    assert!(draft["manifest"].is_null(), "71 operations are more than one connector holds: {draft}");
+    assert!(
+        draft["manifest"].is_null(),
+        "71 operations are more than one connector holds: {draft}"
+    );
     assert_eq!(draft["choose"]["cap"], json!(63), "{draft}");
-    assert_eq!(draft["available"].as_array().map(Vec::len), Some(71), "{draft}");
+    assert_eq!(
+        draft["available"].as_array().map(Vec::len),
+        Some(71),
+        "{draft}"
+    );
     // The builder chooses two; the check is derived from the parameterless read.
-    let (status, draft) = call(&app, "POST", "/connectors/openapi", Some(draft_of(Some(vec!["alerts", "station3"])))).await;
+    let (status, draft) = call(
+        &app,
+        "POST",
+        "/connectors/openapi",
+        Some(draft_of(Some(vec!["alerts", "station3"]))),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{draft}");
-    let names: Vec<&str> = draft["manifest"]["operations"].as_array().unwrap().iter().map(|op| op["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = draft["manifest"]["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|op| op["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names.len(), 3, "{names:?}");
-    assert!(names.contains(&"check-connection") && names.contains(&"alerts") && names.contains(&"station3"), "{names:?}");
-    assert!(draft["manifest"]["connection_specification"]["required"].is_null(), "a public API asks for nothing: {draft}");
-    let (status, receipt) = call(&app, "POST", "/connectors", Some(draft["manifest"].clone())).await;
+    assert!(
+        names.contains(&"check-connection")
+            && names.contains(&"alerts")
+            && names.contains(&"station3"),
+        "{names:?}"
+    );
+    assert!(
+        draft["manifest"]["connection_specification"]["required"].is_null(),
+        "a public API asks for nothing: {draft}"
+    );
+    let (status, receipt) =
+        call(&app, "POST", "/connectors", Some(draft["manifest"].clone())).await;
     assert_eq!(status, StatusCode::CREATED, "{receipt}");
     let _ = std::fs::remove_dir_all(store);
 }

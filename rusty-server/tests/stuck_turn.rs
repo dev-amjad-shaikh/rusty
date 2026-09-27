@@ -12,8 +12,8 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use rusty_agent_runtime::error::{Result as RustyResult, RustyError};
-use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::llm::Role;
+use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::react::{create_react_agent, MESSAGES_CHANNEL, UNRECORDED_READ_NOTICE};
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::state::{Reducer, StateSpec};
@@ -39,7 +39,11 @@ impl ChatModel for ScriptedModel {
             .unwrap()
             .pop_front()
             .ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
-        Ok(ChatResponse { message, model: Some("scripted".into()), usage: None })
+        Ok(ChatResponse {
+            message,
+            model: Some("scripted".into()),
+            usage: None,
+        })
     }
 }
 
@@ -66,11 +70,21 @@ impl Tool for Echo {
 
 fn app() -> (Router, PathBuf, Seen) {
     let store = std::env::temp_dir().join(format!("rusty-server-stuck-{}", uuid::Uuid::new_v4()));
-    let call = |id: &str| ChatMessage::assistant_tool_calls(vec![ToolCall::new(id, "echo", json!({"text": "hi"}))]);
+    let call = |id: &str| {
+        ChatMessage::assistant_tool_calls(vec![ToolCall::new(id, "echo", json!({"text": "hi"}))])
+    };
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));
     let model: Arc<dyn ChatModel> = Arc::new(ScriptedModel {
         script: Mutex::new(
-            vec![call("c1"), call("c2"), call("c3"), ChatMessage::assistant("recovered: the earlier call's result was lost, so here is a fresh answer")].into(),
+            vec![
+                call("c1"),
+                call("c2"),
+                call("c3"),
+                ChatMessage::assistant(
+                    "recovered: the earlier call's result was lost, so here is a fresh answer",
+                ),
+            ]
+            .into(),
         ),
         seen: Arc::clone(&seen),
     });
@@ -81,8 +95,17 @@ fn app() -> (Router, PathBuf, Seen) {
     let mut registry = GraphRegistry::new();
     // Registered with its tools, the way the product registers a graph: the
     // catalog is what says whether a lost call was a read or a write.
-    registry.register_with_tools("react", graph, spec, &tools).unwrap();
-    (router(registry, ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone())), store, seen)
+    registry
+        .register_with_tools("react", graph, spec, &tools)
+        .unwrap();
+    (
+        router(
+            registry,
+            ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone()),
+        ),
+        store,
+        seen,
+    )
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -94,10 +117,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -129,7 +159,10 @@ async fn a_run_that_loops_on_one_call_stops_and_is_on_the_repair_ledger() {
         .filter(|r| r["component"] == "stuck_turn_detector")
         .collect();
     assert_eq!(stuck.len(), 2, "{repairs}");
-    let mut outcomes: Vec<&str> = stuck.iter().map(|r| r["outcome"].as_str().unwrap()).collect();
+    let mut outcomes: Vec<&str> = stuck
+        .iter()
+        .map(|r| r["outcome"].as_str().unwrap())
+        .collect();
     outcomes.sort_unstable();
     assert_eq!(outcomes, vec!["failed", "repaired"]);
 
@@ -140,11 +173,18 @@ async fn a_run_that_loops_on_one_call_stops_and_is_on_the_repair_ledger() {
         &app,
         "POST",
         &format!("/threads/{thread_id}/runs/wait"),
-        Some(json!({ "input": { MESSAGES_CHANNEL: [{"role": "user", "content": "are you ok?"}] } })),
+        Some(
+            json!({ "input": { MESSAGES_CHANNEL: [{"role": "user", "content": "are you ok?"}] } }),
+        ),
     )
     .await;
     assert_eq!(next["status"], "success", "{next}");
-    let last_request = seen.lock().unwrap().last().cloned().expect("the model was called");
+    let last_request = seen
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("the model was called");
     let batch = last_request
         .iter()
         .position(|m| m.tool_calls.iter().any(|c| c.id == "c3"))
@@ -153,13 +193,30 @@ async fn a_run_that_loops_on_one_call_stops_and_is_on_the_repair_ledger() {
     assert_eq!(answer.role, Role::Tool, "{last_request:?}");
     assert_eq!(answer.tool_call_id.as_deref(), Some("c3"));
     assert_eq!(answer.content.as_deref(), Some(UNRECORDED_READ_NOTICE));
-    assert_eq!(last_request.last().unwrap().content.as_deref(), Some("are you ok?"));
+    assert_eq!(
+        last_request.last().unwrap().content.as_deref(),
+        Some("are you ok?")
+    );
 
     let (_, repairs) = call(&app, "GET", "/repairs", None).await;
-    let records = repairs["records"].as_array().cloned().or_else(|| repairs.as_array().cloned()).unwrap();
-    let crash: Vec<&Value> = records.iter().filter(|r| r["component"] == "crash_repair").collect();
+    let records = repairs["records"]
+        .as_array()
+        .cloned()
+        .or_else(|| repairs.as_array().cloned())
+        .unwrap();
+    let crash: Vec<&Value> = records
+        .iter()
+        .filter(|r| r["component"] == "crash_repair")
+        .collect();
     assert_eq!(crash.len(), 1, "{repairs}");
     assert_eq!(crash[0]["trigger"]["trigger"], "crash");
-    assert!(crash[0]["citations"][0].as_str().unwrap().starts_with("c3:echo:lost"), "{}", crash[0]);
+    assert!(
+        crash[0]["citations"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("c3:echo:lost"),
+        "{}",
+        crash[0]
+    );
     let _ = std::fs::remove_dir_all(store);
 }

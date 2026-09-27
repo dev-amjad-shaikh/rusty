@@ -576,19 +576,20 @@ async fn execute_action(
             // The variables the agent sources from its trigger's event
             // (`studio_intent.variables[].source == "trigger"`, a `path`
             // like `event.ticket.org`) are filled from this firing's event.
-            let from_event: std::collections::BTreeMap<String, String> = crate::variables::assistant_variables(&assistant.config)
-                .iter()
-                .filter(|v| v.get("source").and_then(Value::as_str) == Some("trigger"))
-                .filter_map(|v| {
-                    let name = v.get("name").and_then(Value::as_str)?;
-                    let path = v.get("path").and_then(Value::as_str)?;
-                    let value = match resolve_path(event, path.trim())? {
-                        Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
-                    Some((name.to_owned(), value))
-                })
-                .collect();
+            let from_event: std::collections::BTreeMap<String, String> =
+                crate::variables::assistant_variables(&assistant.config)
+                    .iter()
+                    .filter(|v| v.get("source").and_then(Value::as_str) == Some("trigger"))
+                    .filter_map(|v| {
+                        let name = v.get("name").and_then(Value::as_str)?;
+                        let path = v.get("path").and_then(Value::as_str)?;
+                        let value = match resolve_path(event, path.trim())? {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        };
+                        Some((name.to_owned(), value))
+                    })
+                    .collect();
             if !from_event.is_empty() {
                 payload
                     .config
@@ -597,7 +598,14 @@ async fn execute_action(
                     .get_or_insert_with(Default::default)
                     .extend(from_event);
             }
-            crate::routes::apply_assistant_defaults(state, tenant, &internal_thread_id, &assistant, &mut payload).await;
+            crate::routes::apply_assistant_defaults(
+                state,
+                tenant,
+                &internal_thread_id,
+                &assistant,
+                &mut payload,
+            )
+            .await;
             schedule_run(
                 state,
                 &internal_thread_id,
@@ -989,13 +997,36 @@ pub(crate) async fn create_trigger(
     validate_client_id("trigger_id", &trigger_id)?;
     // A world is a place a fresh run acts in; the webhook that starts one
     // may name it, resolved to its id here so a renamed world stays bound.
-    if (payload.world.as_deref().map(str::trim).is_some_and(|w| !w.is_empty()) || !payload.worlds.is_empty()) && payload.action != TriggerAction::StartRun {
-        return Err(ApiError::bad_request("only a webhook that starts a run can be put in a world".to_owned()));
+    if (payload
+        .world
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|w| !w.is_empty())
+        || !payload.worlds.is_empty())
+        && payload.action != TriggerAction::StartRun
+    {
+        return Err(ApiError::bad_request(
+            "only a webhook that starts a run can be put in a world".to_owned(),
+        ));
     }
-    let resolved = crate::worlds::resolve_worlds(&state, tenant.tenant(), payload.world.as_deref(), &payload.worlds, "the webhook").await?;
+    let resolved = crate::worlds::resolve_worlds(
+        &state,
+        tenant.tenant(),
+        payload.world.as_deref(),
+        &payload.worlds,
+        "the webhook",
+    )
+    .await?;
     let world = resolved.first().map(|w| w.world_id.clone());
     let world_name = resolved.first().map(|w| w.name.clone());
-    let (worlds, world_names): (Vec<String>, Vec<String>) = if resolved.len() > 1 { resolved.iter().map(|w| (w.world_id.clone(), w.name.clone())).unzip() } else { (Vec::new(), Vec::new()) };
+    let (worlds, world_names): (Vec<String>, Vec<String>) = if resolved.len() > 1 {
+        resolved
+            .iter()
+            .map(|w| (w.world_id.clone(), w.name.clone()))
+            .unzip()
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     let record = TriggerRecord {
         trigger_id: tenant.scope(&trigger_id),
@@ -1418,9 +1449,15 @@ async fn execute_and_log(
         // The sender got its 502; the person who made the webhook hears
         // of the event that could not act, once, in the Inbox — the
         // dead-letter list is where it can be replayed.
-        if let Some(who) = trigger.created_by.as_ref().filter(|w| w.get("principal_id").is_some()) {
+        if let Some(who) = trigger
+            .created_by
+            .as_ref()
+            .filter(|w| w.get("principal_id").is_some())
+        {
             let tenant = tenant_of_internal(&trigger.trigger_id);
-            let external = strip_owned(tenant, &trigger.trigger_id).unwrap_or(&trigger.trigger_id).to_owned();
+            let external = strip_owned(tenant, &trigger.trigger_id)
+                .unwrap_or(&trigger.trigger_id)
+                .to_owned();
             crate::notices::tell_in(
                 &state.server_store,
                 tenant,

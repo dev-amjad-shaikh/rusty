@@ -95,13 +95,13 @@ pub mod trace;
 
 pub use assertion::{Assertion, AssertionResult};
 pub use clustering::{
-    AssertionFailureKey, ExecutionFailureCategory, FAILURE_CLUSTER_REPORT_FORMAT_VERSION,
-    FailureCause, FailureCluster, FailureClusterReport, FailureEvidenceRef, FailureOccurrence,
-    FailureSignature, FailureTermination, cluster_failures,
+    cluster_failures, AssertionFailureKey, ExecutionFailureCategory, FailureCause, FailureCluster,
+    FailureClusterReport, FailureEvidenceRef, FailureOccurrence, FailureSignature,
+    FailureTermination, FAILURE_CLUSTER_REPORT_FORMAT_VERSION,
 };
 pub use compare::{
-    AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport, LatencyDelta,
-    Regression, compare,
+    compare, AssertionDelta, CaseChange, CaseDelta, CompareThresholds, ComparisonReport,
+    LatencyDelta, Regression,
 };
 pub use conformance::{
     to_experiment_report, ConformanceCase, ConformanceCheck, ConformanceReport, ConformanceRunner,
@@ -109,44 +109,45 @@ pub use conformance::{
     CONFORMANCE_SUITE_FORMAT_VERSION,
 };
 pub use dataset::{
-    DATASET_FORMAT_VERSION, Dataset, EvalCase, Expectation, ExpectedToolCall, StatePredicate, ExpectedWorldWrite,
+    Dataset, EvalCase, Expectation, ExpectedToolCall, ExpectedWorldWrite, StatePredicate,
+    DATASET_FORMAT_VERSION,
 };
 pub use error::{EvalError, Result};
 pub use evidence::{RunEvidence, RunStatus, ToolCallRecord, WorldWrite};
 pub use experiment::{
     AssertionPassRate, CaseReport, CaseRunReport, ExperimentConfig, ExperimentReport,
-    ExperimentRunner, LatencyStats, PreparedRun, REPORT_FORMAT_VERSION, ReportSummary,
+    ExperimentRunner, LatencyStats, PreparedRun, ReportSummary, REPORT_FORMAT_VERSION,
 };
 pub use feedback::{
-    AnnotationQueue, AnnotationStatus, AnnotationTask, FEEDBACK_FORMAT_VERSION,
-    ResolutionAuthority, ReviewCandidate, ReviewDecision, ReviewLease, ReviewResolution,
-    ReviewRubric, ReviewSubmission, RubricCriterion, StoredReview, TraceRef,
+    AnnotationQueue, AnnotationStatus, AnnotationTask, ResolutionAuthority, ReviewCandidate,
+    ReviewDecision, ReviewLease, ReviewResolution, ReviewRubric, ReviewSubmission, RubricCriterion,
+    StoredReview, TraceRef, FEEDBACK_FORMAT_VERSION,
 };
 pub use gate::{
-    GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION, GateCheck, GateDecision, GateMetric,
-    GateOutcome, GatePolicy, evaluate_gate,
+    evaluate_gate, GateCheck, GateDecision, GateMetric, GateOutcome, GatePolicy,
+    GATE_DECISION_FORMAT_VERSION, GATE_POLICY_FORMAT_VERSION,
 };
 pub use judge::{
+    JudgeModel, JudgeRequest, JudgeVerdict, ModelJudge, RuleBasedJudge,
     DEFAULT_MODEL_JUDGE_MAX_REQUEST_BYTES, DEFAULT_MODEL_JUDGE_MAX_RESPONSE_BYTES,
-    DEFAULT_MODEL_JUDGE_PASS_SCORE, JudgeModel, JudgeRequest, JudgeVerdict,
-    MAX_MODEL_JUDGE_RATIONALE_BYTES, ModelJudge, RuleBasedJudge,
+    DEFAULT_MODEL_JUDGE_PASS_SCORE, MAX_MODEL_JUDGE_RATIONALE_BYTES,
 };
 pub use online_scoring::{
-    BudgetTracker, InMemoryBudgetTracker, OUTCOME_ANNOTATION_FORMAT_VERSION, OnlineScoringPolicy,
-    OnlineScoringRunner, OutcomeAnnotation, SamplingDecision, ScorerBinding, ScorerOutcome,
-    ScorerRegistry, ScoringTask,
-};
-pub use span_query::{
-    AttributeKind, AttributePredicate, PredicateOp, QueryFailure, QueryVerdict, SpanConstraint,
-    SpanQuery, SpanSelection, SpanSummary, SPAN_VOCABULARY, SPAN_VOCABULARY_VERSION,
-    VocabularyEntry, evaluate_all, evaluate_query,
-};
-pub use trace::{AttributeValue, SPAN_NAMES, SpanTree, TraceSpan};
-pub use statistics::{
-    STATISTICAL_REGRESSION_FORMAT_VERSION, StatisticalDecision, StatisticalRegressionConfig,
-    StatisticalRegressionReport, detect_pass_rate_regression,
+    BudgetTracker, InMemoryBudgetTracker, OnlineScoringPolicy, OnlineScoringRunner,
+    OutcomeAnnotation, SamplingDecision, ScorerBinding, ScorerOutcome, ScorerRegistry, ScoringTask,
+    OUTCOME_ANNOTATION_FORMAT_VERSION,
 };
 pub use simulator::{
     run_simulation, BehaviorRule, SimulationResult, SimulationScenario, SteeringTool,
     TerminationCause, TerminationCriteria, Trigger, UserAction,
 };
+pub use span_query::{
+    evaluate_all, evaluate_query, AttributeKind, AttributePredicate, PredicateOp, QueryFailure,
+    QueryVerdict, SpanConstraint, SpanQuery, SpanSelection, SpanSummary, VocabularyEntry,
+    SPAN_VOCABULARY, SPAN_VOCABULARY_VERSION,
+};
+pub use statistics::{
+    detect_pass_rate_regression, StatisticalDecision, StatisticalRegressionConfig,
+    StatisticalRegressionReport, STATISTICAL_REGRESSION_FORMAT_VERSION,
+};
+pub use trace::{AttributeValue, SpanTree, TraceSpan, SPAN_NAMES};

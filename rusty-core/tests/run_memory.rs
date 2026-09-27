@@ -21,7 +21,9 @@ use rusty_agent_runtime::memory::{
     InMemoryMemoryStore, MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, MemorySource,
     MemoryStore, ProvenanceAuthor, ScopeAddress, ValidityWindow,
 };
-use rusty_agent_runtime::react::{create_react_agent, create_react_agent_replaying, MESSAGES_CHANNEL};
+use rusty_agent_runtime::react::{
+    create_react_agent, create_react_agent_replaying, MESSAGES_CHANNEL,
+};
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::replay::{ExactReplay, ReplayParams};
 use rusty_agent_runtime::state::{Reducer, State, StateSpec};
@@ -45,8 +47,17 @@ struct ScriptedModel {
 impl ChatModel for ScriptedModel {
     async fn chat(&self, messages: &[ChatMessage], _tools: &[Value]) -> RustyResult<ChatResponse> {
         self.seen.lock().unwrap().push(messages.to_vec());
-        let message = self.script.lock().unwrap().pop_front().ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
-        Ok(ChatResponse { message, model: Some("scripted-memory".into()), usage: None })
+        let message = self
+            .script
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| RustyError::Llm("script exhausted".into()))?;
+        Ok(ChatResponse {
+            message,
+            model: Some("scripted-memory".into()),
+            usage: None,
+        })
     }
 }
 
@@ -116,9 +127,18 @@ async fn store_with_a_preference() -> Arc<dyn MemoryStore> {
     let record = MemoryRecord::new(
         MemoryKind::Preference,
         ScopeAddress::new(MemoryScope::User, "bob"),
-        MemoryProvenance { author: ProvenanceAuthor::Human { human_id: "bob".into() }, evidence: Default::default(), written_at: now },
+        MemoryProvenance {
+            author: ProvenanceAuthor::Human {
+                human_id: "bob".into(),
+            },
+            evidence: Default::default(),
+            written_at: now,
+        },
         1.0,
-        ValidityWindow { valid_from: now, valid_until: None },
+        ValidityWindow {
+            valid_from: now,
+            valid_until: None,
+        },
         now,
         json!({"text": "I prefer metric units"}),
     )
@@ -154,7 +174,11 @@ async fn record_run() -> (JournalSnapshot, State, Seen) {
         .with_acting_for("bob")
         .with_agent_id("recall-1")
         .with_memory_source(MemorySource::Store(store_with_a_preference().await));
-    match executor.run(&graph, &spec(), initial_state(), config).await.unwrap() {
+    match executor
+        .run(&graph, &spec(), initial_state(), config)
+        .await
+        .unwrap()
+    {
         ExecutionOutcome::Done(state) => (journal.snapshot(), state, seen),
         other => panic!("expected Done, got {other:?}"),
     }
@@ -167,31 +191,62 @@ async fn the_model_reads_memory_and_a_tool_knows_its_run() {
     assert_eq!(seen.len(), 2);
     let memory = seen[0]
         .iter()
-        .find(|m| m.role == Role::System && m.content.as_deref().is_some_and(|c| c.starts_with("# Memory")))
+        .find(|m| {
+            m.role == Role::System
+                && m.content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with("# Memory"))
+        })
         .expect("the first model call carries a # Memory section");
     let text = memory.content.as_deref().unwrap();
-    assert!(text.contains("I prefer metric units") && text.contains("user:bob"), "{text}");
+    assert!(
+        text.contains("I prefer metric units") && text.contains("user:bob"),
+        "{text}"
+    );
     // The situation: the date from the run's logical clock, and whom the
     // run is a conversation with — declared on the config, so the tool's
     // person and the model's "you" agree.
     let situation = seen[0]
         .iter()
-        .find(|m| m.role == Role::System && m.content.as_deref().is_some_and(|c| c.starts_with("Today is ")))
+        .find(|m| {
+            m.role == Role::System
+                && m.content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with("Today is "))
+        })
         .expect("the first model call carries the situation");
     let situation = situation.content.as_deref().unwrap();
-    assert!(situation.contains("2023-11-14"), "the logical clock's date: {situation}");
-    assert!(situation.contains("This conversation is with bob"), "{situation}");
+    assert!(
+        situation.contains("2023-11-14"),
+        "the logical clock's date: {situation}"
+    );
+    assert!(
+        situation.contains("This conversation is with bob"),
+        "{situation}"
+    );
 
     let messages: Vec<ChatMessage> = state.get_as(MESSAGES_CHANNEL).unwrap().unwrap();
-    let tool_result = messages.iter().find(|m| m.role == Role::Tool).expect("the tool ran");
+    let tool_result = messages
+        .iter()
+        .find(|m| m.role == Role::Tool)
+        .expect("the tool ran");
     let said = tool_result.content.as_deref().unwrap();
-    assert!(said.contains("\"person\":\"bob\"") || said.contains("\"person\": \"bob\""), "{said}");
+    assert!(
+        said.contains("\"person\":\"bob\"") || said.contains("\"person\": \"bob\""),
+        "{said}"
+    );
     assert!(said.contains("recall-1"), "{said}");
     assert!(said.contains("t-run-memory"), "{said}");
-    assert!(said.contains("\"has_journal\":true") || said.contains("\"has_journal\": true"), "{said}");
+    assert!(
+        said.contains("\"has_journal\":true") || said.contains("\"has_journal\": true"),
+        "{said}"
+    );
 
     // The read is evidence: one MemoryRead event under the pipeline.
-    assert!(snapshot.events.iter().any(|e| e.kind == rusty_agent_runtime::record::RunEventKind::MemoryRead));
+    assert!(snapshot
+        .events
+        .iter()
+        .any(|e| e.kind == rusty_agent_runtime::record::RunEventKind::MemoryRead));
 }
 
 #[tokio::test]
@@ -200,11 +255,24 @@ async fn a_run_that_read_memory_replays_from_the_log() {
     let replay = ExactReplay::new(snapshot.clone()).unwrap();
     let journal = replay.fresh_journal(logical_clock());
     let calls = Arc::new(AtomicUsize::new(0));
-    let graph = create_react_agent_replaying(Arc::new(PanicModel(Arc::clone(&calls))), tools(), replay.source(), journal.clone()).unwrap();
-    let params = ReplayParams::new(journal, RngSource::seeded(RNG_SEED)).with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
-    let replayed = replay.run_and_verify(&graph, &spec(), initial_state(), params).await.unwrap();
+    let graph = create_react_agent_replaying(
+        Arc::new(PanicModel(Arc::clone(&calls))),
+        tools(),
+        replay.source(),
+        journal.clone(),
+    )
+    .unwrap();
+    let params = ReplayParams::new(journal, RngSource::seeded(RNG_SEED))
+        .with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
+    let replayed = replay
+        .run_and_verify(&graph, &spec(), initial_state(), params)
+        .await
+        .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert_eq!(serde_json::to_string(&snapshot).unwrap(), serde_json::to_string(&replayed.journal).unwrap());
+    assert_eq!(
+        serde_json::to_string(&snapshot).unwrap(),
+        serde_json::to_string(&replayed.journal).unwrap()
+    );
     match &replayed.outcome {
         ExecutionOutcome::Done(state) => assert_eq!(state, &recorded_state),
         other => panic!("expected Done, got {other:?}"),
@@ -225,14 +293,44 @@ async fn a_declared_counterpart_wins_over_the_attribution() {
         attribution: Some(json!({"principal_id": "bob", "name": "Bob", "kind": "user"})),
         ..Default::default()
     };
-    assert_eq!(ctx.person_id(), Some("bob"), "no declaration: the attribution's user");
+    assert_eq!(
+        ctx.person_id(),
+        Some("bob"),
+        "no declaration: the attribution's user"
+    );
     use rusty_agent_runtime::tool::Counterpart;
-    let declared = rusty_agent_runtime::tool::RunContext { counterpart: Some(Counterpart::Person("cy".into())), ..ctx.clone() };
-    assert_eq!(declared.person_id(), Some("cy"), "a declared counterpart wins");
-    let nobody = rusty_agent_runtime::tool::RunContext { counterpart: Some(Counterpart::Nobody), ..ctx.clone() };
-    assert_eq!(nobody.person_id(), None, "a declared nobody is nobody, whoever the attribution names");
-    assert_eq!(Counterpart::from_value(&Counterpart::Nobody.to_value()), Counterpart::Nobody);
-    assert_eq!(Counterpart::from_value(&Counterpart::Person("bob".into()).to_value()), Counterpart::Person("bob".into()));
-    assert!(!Counterpart::Nobody.to_value().is_null(), "nobody is never null on the wire");
-    assert_eq!(Counterpart::from_value(&json!("bob")), Counterpart::Person("bob".into()));
+    let declared = rusty_agent_runtime::tool::RunContext {
+        counterpart: Some(Counterpart::Person("cy".into())),
+        ..ctx.clone()
+    };
+    assert_eq!(
+        declared.person_id(),
+        Some("cy"),
+        "a declared counterpart wins"
+    );
+    let nobody = rusty_agent_runtime::tool::RunContext {
+        counterpart: Some(Counterpart::Nobody),
+        ..ctx.clone()
+    };
+    assert_eq!(
+        nobody.person_id(),
+        None,
+        "a declared nobody is nobody, whoever the attribution names"
+    );
+    assert_eq!(
+        Counterpart::from_value(&Counterpart::Nobody.to_value()),
+        Counterpart::Nobody
+    );
+    assert_eq!(
+        Counterpart::from_value(&Counterpart::Person("bob".into()).to_value()),
+        Counterpart::Person("bob".into())
+    );
+    assert!(
+        !Counterpart::Nobody.to_value().is_null(),
+        "nobody is never null on the wire"
+    );
+    assert_eq!(
+        Counterpart::from_value(&json!("bob")),
+        Counterpart::Person("bob".into())
+    );
 }

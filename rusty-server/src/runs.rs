@@ -36,8 +36,8 @@
 //! boundary (in [`forward_events`]) and once more at run completion, and
 //! served read-only by `GET /runs/{id}/events`.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
 use rusty_agent_runtime::memory::{MemoryScope, MemorySource, MemoryStore, ScopeAddress};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -238,13 +238,17 @@ impl ContextOverride {
     /// the deployment's memory section (resized to an eighth, as the
     /// deployment sizes it) and its tokenizer; a kept-messages count lands
     /// on the compaction the policy already has.
-    pub fn apply(&self, base: &rusty_agent_runtime::context::ContextPolicy) -> rusty_agent_runtime::context::ContextPolicy {
+    pub fn apply(
+        &self,
+        base: &rusty_agent_runtime::context::ContextPolicy,
+    ) -> rusty_agent_runtime::context::ContextPolicy {
         let mut policy = match self.budget_tokens {
             Some(window) => {
                 let mut resized = rusty_agent_runtime::context::ContextPolicy::standard(window);
                 resized.tokenizer = base.tokenizer.clone();
                 if base.memory.is_some() {
-                    resized = resized.with_memory_section((window.max(4_096) / 8).clamp(512, 4_096));
+                    resized =
+                        resized.with_memory_section((window.max(4_096) / 8).clamp(512, 4_096));
                     if let Some(recall) = &base.recall {
                         resized = resized.with_recall(recall.budget_tokens, recall.top_k);
                     }
@@ -253,7 +257,9 @@ impl ContextOverride {
             }
             None => base.clone(),
         };
-        if let (Some(keep), Some(compaction)) = (self.keep_recent_messages, policy.compaction.as_mut()) {
+        if let (Some(keep), Some(compaction)) =
+            (self.keep_recent_messages, policy.compaction.as_mut())
+        {
             // The studio counts turns: the number is the steps kept, and
             // the message floor with it.
             compaction.keep_recent_messages = keep.max(1);
@@ -620,7 +626,9 @@ fn run_info_of(h: &RunHandle) -> RunInfo {
 /// The worlds a run's config puts it in, by id: `worlds` when several,
 /// else the one `world`, else none.
 pub(crate) fn worlds_of(config: Option<&RunConfigPayload>) -> Vec<String> {
-    let Some(config) = config else { return Vec::new() };
+    let Some(config) = config else {
+        return Vec::new();
+    };
     match (&config.worlds, &config.world) {
         (Some(many), _) if many.len() > 1 => many.clone(),
         (_, Some(one)) => vec![one.clone()],
@@ -1576,7 +1584,8 @@ async fn continued_state(
     if let Ok(Some(mut messages)) = state.get_as::<Vec<rusty_agent_runtime::llm::ChatMessage>>(
         rusty_agent_runtime::react::MESSAGES_CHANNEL,
     ) {
-        let calls = rusty_agent_runtime::react::repair_unpaired_tool_calls(&mut messages, repeatable);
+        let calls =
+            rusty_agent_runtime::react::repair_unpaired_tool_calls(&mut messages, repeatable);
         if !calls.is_empty() {
             state.insert(
                 rusty_agent_runtime::react::MESSAGES_CHANNEL,
@@ -1608,7 +1617,15 @@ async fn continued_state(
 /// when the run read memory — the notes it was shown, as one REMEMBERED
 /// message in the turn, so what the agent remembered is evidence the
 /// judge weighs and a later re-judging reads the same.
-async fn verify_done(deps: &RunDeps, snap: &RunSnapshot, state: &State, journal: &Journal) -> Option<(crate::verify_outcome::Verdict, Vec<rusty_agent_runtime::llm::ChatMessage>)> {
+async fn verify_done(
+    deps: &RunDeps,
+    snap: &RunSnapshot,
+    state: &State,
+    journal: &Journal,
+) -> Option<(
+    crate::verify_outcome::Verdict,
+    Vec<rusty_agent_runtime::llm::ChatMessage>,
+)> {
     let judge = deps.verifier.as_ref()?;
     let mut messages: Vec<rusty_agent_runtime::llm::ChatMessage> = state
         .get_as(rusty_agent_runtime::react::MESSAGES_CHANNEL)
@@ -1622,7 +1639,9 @@ async fn verify_done(deps: &RunDeps, snap: &RunSnapshot, state: &State, journal:
     let remembered = crate::verify_outcome::remembered_in(journal);
     let mut names: HashMap<String, String> = HashMap::new();
     for record in &remembered {
-        if let rusty_agent_runtime::memory::ProvenanceAuthor::Agent { agent_id } = &record.provenance.author {
+        if let rusty_agent_runtime::memory::ProvenanceAuthor::Agent { agent_id } =
+            &record.provenance.author
+        {
             if !names.contains_key(agent_id) {
                 if let Ok(Some(agent)) = deps.server_store.get_assistant(agent_id).await {
                     names.insert(agent_id.clone(), agent.name);
@@ -1631,11 +1650,17 @@ async fn verify_done(deps: &RunDeps, snap: &RunSnapshot, state: &State, journal:
         }
     }
     if let Some(remembered) = crate::verify_outcome::remembered_message(&remembered, &names) {
-        let at = messages.iter().rposition(|m| m.role == rusty_agent_runtime::llm::Role::User).map(|i| i + 1).unwrap_or(messages.len());
+        let at = messages
+            .iter()
+            .rposition(|m| m.role == rusty_agent_runtime::llm::Role::User)
+            .map(|i| i + 1)
+            .unwrap_or(messages.len());
         messages.insert(at, remembered);
     }
     let catalog = deps.registry.tool_capabilities(&snap.graph);
-    let mut verdict = crate::verify_outcome::verify(judge.0.as_ref(), charter.as_deref(), &messages, &catalog).await;
+    let mut verdict =
+        crate::verify_outcome::verify(judge.0.as_ref(), charter.as_deref(), &messages, &catalog)
+            .await;
     verdict.graph = Some(snap.graph.clone());
     Some((verdict, messages))
 }
@@ -1649,7 +1674,8 @@ fn record_outcome_repair(
     second: Option<&crate::verify_outcome::Verdict>,
 ) {
     use rusty_agent_runtime::repair::{
-        RepairAction, RepairComponent, RepairLedger, RepairOutcome, RepairRecordBuilder, RepairRung, RepairTrigger,
+        RepairAction, RepairComponent, RepairLedger, RepairOutcome, RepairRecordBuilder,
+        RepairRung, RepairTrigger,
     };
     let now = chrono::Utc::now();
     let outcome = match second.map(|v| v.verdict.as_str()) {
@@ -1658,8 +1684,12 @@ fn record_outcome_repair(
     };
     let mut builder = RepairRecordBuilder::new()
         .component(RepairComponent::OutcomeVerifier)
-        .trigger(RepairTrigger::OutcomeNotAchieved { reason: first.reason.clone() })
-        .action(RepairAction::RepairTurn { rung: RepairRung::InTurn })
+        .trigger(RepairTrigger::OutcomeNotAchieved {
+            reason: first.reason.clone(),
+        })
+        .action(RepairAction::RepairTurn {
+            rung: RepairRung::InTurn,
+        })
         .outcome(outcome)
         .start_time(first.at)
         .end_time(now)
@@ -1781,7 +1811,12 @@ async fn execute(deps: RunDeps, run_id: String) {
         // super-step boundary — a point where a checkpoint was just
         // persisted — instead of being torn down mid-step.
         .with_cancellation(snap.cancel.clone());
-    if let Some(blocks) = snap.payload.config.as_ref().and_then(|c| c.memory_blocks.clone()) {
+    if let Some(blocks) = snap
+        .payload
+        .config
+        .as_ref()
+        .and_then(|c| c.memory_blocks.clone())
+    {
         config = config.with_memory_blocks(blocks);
     }
     // Registry admission (R0.11 wave 2): the binding resolved at schedule
@@ -1849,7 +1884,10 @@ async fn execute(deps: RunDeps, run_id: String) {
         if let Some(model) = &run_cfg.fallback_model {
             config = config.with_fallback_model(model.clone());
         }
-        if let Some(t) = run_cfg.temperature.filter(|t| t.is_finite() && (0.0..=2.0).contains(t)) {
+        if let Some(t) = run_cfg
+            .temperature
+            .filter(|t| t.is_finite() && (0.0..=2.0).contains(t))
+        {
             config = config.with_temperature(t);
         }
         if let Some(skills) = &run_cfg.skills {
@@ -1867,7 +1905,13 @@ async fn execute(deps: RunDeps, run_id: String) {
     // the ranking is journaled with the request.
     if let Some(policy) = &deps.context_policy {
         // The agent's own context, where the builder set one.
-        let mut tailored = snap.payload.config.as_ref().and_then(|c| c.context.as_ref()).filter(|c| !c.is_empty()).map(|c| c.apply(policy));
+        let mut tailored = snap
+            .payload
+            .config
+            .as_ref()
+            .and_then(|c| c.context.as_ref())
+            .filter(|c| !c.is_empty())
+            .map(|c| c.apply(policy));
         // Lane-one recall ranks with the utility index this process holds,
         // named by its stamp so the journaled request says which one.
         if let Some(stamp) = crate::memory_utility::cached_stamp() {
@@ -1881,18 +1925,25 @@ async fn execute(deps: RunDeps, run_id: String) {
         // room they need (plus the situation's own lines), so an agent
         // with full blocks runs at a small window instead of failing on
         // "the task section does not fit".
-        if let Some(blocks) = snap.payload.config.as_ref().and_then(|c| c.memory_blocks.as_deref()) {
-            let base = tailored.take().unwrap_or_else(|| policy.clone());
-            tailored = Some(base.with_task_room(blocks.len() + 512));
-        }
-        config = config.with_context_policy(tailored.as_ref().unwrap_or(policy)).with_compaction_state();
-        let overlays: BTreeMap<String, rusty_agent_runtime::tool_select::ToolSelectionOverlay> = snap
+        if let Some(blocks) = snap
             .payload
             .config
             .as_ref()
-            .and_then(|c| c.tool_overlays.as_ref())
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+            .and_then(|c| c.memory_blocks.as_deref())
+        {
+            let base = tailored.take().unwrap_or_else(|| policy.clone());
+            tailored = Some(base.with_task_room(blocks.len() + 512));
+        }
+        config = config
+            .with_context_policy(tailored.as_ref().unwrap_or(policy))
+            .with_compaction_state();
+        let overlays: BTreeMap<String, rusty_agent_runtime::tool_select::ToolSelectionOverlay> =
+            snap.payload
+                .config
+                .as_ref()
+                .and_then(|c| c.tool_overlays.as_ref())
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
         config = config.with_tool_overlays(&overlays);
         let outcomes = recent_tool_outcomes(&deps).await;
         config = config.with_tool_outcomes(&outcomes);
@@ -1922,7 +1973,9 @@ async fn execute(deps: RunDeps, run_id: String) {
     // evaluation replaying a person's case, or another agent asking on a
     // person's behalf, is not fired: it names the person and is theirs.
     let channel_fired = snap.payload.metadata.as_ref().is_some_and(|m| {
-        ["cron_id", "trigger_id", "task_id", "trigger"].iter().any(|k| m.get(k).is_some())
+        ["cron_id", "trigger_id", "task_id", "trigger"]
+            .iter()
+            .any(|k| m.get(k).is_some())
             || matches!(
                 m.get("channel").and_then(Value::as_str),
                 Some("schedule") | Some("webhook") | Some("pool")
@@ -1989,7 +2042,13 @@ async fn execute(deps: RunDeps, run_id: String) {
         Some(world) => {
             let mut block = execution;
             block["world"] = json!(world);
-            if let Some(worlds) = snap.payload.config.as_ref().and_then(|c| c.worlds.clone()).filter(|w| w.len() > 1) {
+            if let Some(worlds) = snap
+                .payload
+                .config
+                .as_ref()
+                .and_then(|c| c.worlds.clone())
+                .filter(|w| w.len() > 1)
+            {
                 block["worlds"] = json!(worlds);
             }
             block
@@ -2005,12 +2064,17 @@ async fn execute(deps: RunDeps, run_id: String) {
         .cloned();
     if let Some(who) = acts_for {
         if !deps.users.still_present(&who) {
-            let message = format!(
+            let message =
+                format!(
                 "this run acts for a person the deployment no longer holds ({}); it will not run",
                 who.get("principal_id").and_then(Value::as_str).unwrap_or("?")
             );
             tracing::warn!(%run_id, %message);
-            sink.push("error", 0, json!({"error": "person_gone", "message": message}));
+            sink.push(
+                "error",
+                0,
+                json!({"error": "person_gone", "message": message}),
+            );
             sink.push("end", 0, json!({"status": "error"}));
             let terminal = json!({
                 "run_id": run_id,
@@ -2037,7 +2101,12 @@ async fn execute(deps: RunDeps, run_id: String) {
         .as_ref()
         .and_then(|c| c.context.as_ref())
         .is_some_and(|c| c.memory_off());
-    if !memory_off && deps.context_policy.as_ref().is_some_and(|p| p.memory.is_some()) {
+    if !memory_off
+        && deps
+            .context_policy
+            .as_ref()
+            .is_some_and(|p| p.memory.is_some())
+    {
         let tenant = crate::auth::tenant_of_internal(&snap.thread_id).to_string();
         let mut scopes = Vec::new();
         if let Some(person) = &person {
@@ -2058,7 +2127,8 @@ async fn execute(deps: RunDeps, run_id: String) {
         // The tools the run was told never to call are held by a guard:
         // the model still sees them, an attempt is refused and journaled.
         if let Some(forbidden) = run_cfg.forbidden_tools.as_ref().filter(|f| !f.is_empty()) {
-            config = config.with_tool_guards(vec![Arc::new(ForbiddenTools::new(forbidden.clone()))]);
+            config =
+                config.with_tool_guards(vec![Arc::new(ForbiddenTools::new(forbidden.clone()))]);
         }
         // Capability admission: the selection validated at schedule time
         // becomes the run's exact tool allowlist, and the composed set's
@@ -2209,7 +2279,10 @@ async fn execute(deps: RunDeps, run_id: String) {
     // question, answered by the evidence and a judge, and kept beside the
     // run rather than in its journal.
     let (mut verification, mut judged) = match &result {
-        Ok(ExecutionOutcome::Done(state)) => verify_done(&deps, &snap, state, &journal).await.map(|(v, m)| (Some(v), Some(m))).unwrap_or((None, None)),
+        Ok(ExecutionOutcome::Done(state)) => verify_done(&deps, &snap, state, &journal)
+            .await
+            .map(|(v, m)| (Some(v), Some(m)))
+            .unwrap_or((None, None)),
         _ => (None, None),
     };
     // Sent back: a failed verdict; or one the judge could not settle while
@@ -2218,24 +2291,41 @@ async fn execute(deps: RunDeps, run_id: String) {
     let could_write = catalog
         .iter()
         .any(|c| !matches!(c.effect, Effect::Pure | Effect::ReadOnly));
-    let sent_back = verification.as_ref().filter(|v| crate::verify_outcome::sends_back(v, could_write)).cloned();
+    let sent_back = verification
+        .as_ref()
+        .filter(|v| crate::verify_outcome::sends_back(v, could_write))
+        .cloned();
     if let (Some(first), Some(config)) = (sent_back, repair_config.take()) {
         let notice = json!({ rusty_agent_runtime::react::MESSAGES_CHANNEL: [
             rusty_agent_runtime::llm::ChatMessage::system(crate::verify_outcome::repair_notice(&first.verdict, &first.reason)),
         ]});
-        match continued_state(&deps.checkpointer, &snap.thread_id, Some(&notice), &spec, &repeatable).await {
+        match continued_state(
+            &deps.checkpointer,
+            &snap.thread_id,
+            Some(&notice),
+            &spec,
+            &repeatable,
+        )
+        .await
+        {
             Ok((again, _)) => {
                 tracing::info!(%run_id, reason = %first.reason, "outcome not achieved: one repair turn");
                 result = executor.run(&graph, &spec, again, config).await;
                 if let Ok(ExecutionOutcome::Done(state)) = &result {
-                    (verification, judged) = verify_done(&deps, &snap, state, &journal).await.map(|(mut second, read)| {
-                        second.repaired = Some(json!({"verdict": first.verdict, "reason": first.reason}));
-                        (Some(second), Some(read))
-                    }).unwrap_or((None, None));
+                    (verification, judged) = verify_done(&deps, &snap, state, &journal)
+                        .await
+                        .map(|(mut second, read)| {
+                            second.repaired =
+                                Some(json!({"verdict": first.verdict, "reason": first.reason}));
+                            (Some(second), Some(read))
+                        })
+                        .unwrap_or((None, None));
                 }
                 record_outcome_repair(&deps, &snap.thread_id, &first, verification.as_ref());
             }
-            Err(error) => tracing::warn!(%run_id, %error, "outcome not achieved, and the thread could not take the repair notice"),
+            Err(error) => {
+                tracing::warn!(%run_id, %error, "outcome not achieved, and the thread could not take the repair notice")
+            }
         }
     }
     // Every sender is dropped with the runs; the forwarder drains what
@@ -2258,14 +2348,19 @@ async fn execute(deps: RunDeps, run_id: String) {
                     tracing::info!(%run_id, verdict = %verdict.verdict, reason = %verdict.reason, repaired = verdict.repaired.is_some(), "outcome verified");
                     deps.verifications.persist(&run_id, &verdict).await;
                     // What the judge read, kept beside the verdict for judging again.
-                    let messages: Vec<rusty_agent_runtime::llm::ChatMessage> = judged.take().unwrap_or_else(|| {
-                        state
-                            .get_as::<Vec<rusty_agent_runtime::llm::ChatMessage>>(rusty_agent_runtime::react::MESSAGES_CHANNEL)
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default()
-                    });
-                    deps.verifications.persist_transcript(&run_id, &messages).await;
+                    let messages: Vec<rusty_agent_runtime::llm::ChatMessage> =
+                        judged.take().unwrap_or_else(|| {
+                            state
+                                .get_as::<Vec<rusty_agent_runtime::llm::ChatMessage>>(
+                                    rusty_agent_runtime::react::MESSAGES_CHANNEL,
+                                )
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default()
+                        });
+                    deps.verifications
+                        .persist_transcript(&run_id, &messages)
+                        .await;
                     if let Some(hook) = deps.after_verdict.get() {
                         let person_id = snap
                             .payload
@@ -2276,7 +2371,9 @@ async fn execute(deps: RunDeps, run_id: String) {
                             .and_then(|c| c.get("principal_id"))
                             .and_then(Value::as_str)
                             .map(str::to_owned);
-                        let rehearsal = snap.payload.config.as_ref().is_some_and(|c| c.world.is_some() || c.worlds.as_ref().is_some_and(|w| !w.is_empty()));
+                        let rehearsal = snap.payload.config.as_ref().is_some_and(|c| {
+                            c.world.is_some() || c.worlds.as_ref().is_some_and(|w| !w.is_empty())
+                        });
                         hook(crate::post_run_review::ReviewInput {
                             run_id: run_id.clone(),
                             verdict: verdict.verdict.clone(),
@@ -2374,7 +2471,12 @@ async fn execute(deps: RunDeps, run_id: String) {
     };
     // A run in a chain of agent-started work: its spend joins the chain's
     // — before the assignments plane is woken, so the next round reads it.
-    crate::chain_spend::note_run_end(deps.server_store.as_ref(), snap.payload.metadata.as_ref(), &terminal).await;
+    crate::chain_spend::note_run_end(
+        deps.server_store.as_ref(),
+        snap.payload.metadata.as_ref(),
+        &terminal,
+    )
+    .await;
     if let Some(plane) = &deps.assignments {
         plane.note_run_end(snap.payload.metadata.as_ref(), &run_id, &terminal);
     }
@@ -2807,7 +2909,10 @@ impl rusty_agent_runtime::tool::ToolGuard for ForbiddenTools {
         "forbidden_tools"
     }
 
-    fn check(&self, call: &rusty_agent_runtime::tool::GuardedCall<'_>) -> Option<rusty_agent_runtime::tool::GuardDenial> {
+    fn check(
+        &self,
+        call: &rusty_agent_runtime::tool::GuardedCall<'_>,
+    ) -> Option<rusty_agent_runtime::tool::GuardDenial> {
         self.names.iter().any(|n| n == call.tool).then(|| {
             rusty_agent_runtime::tool::GuardDenial::new(
                 "forbidden_tools",
@@ -2827,11 +2932,28 @@ mod forbidden_tools_tests {
     fn a_forbidden_tool_is_refused_by_name_and_nothing_else_is() {
         let guard = ForbiddenTools::new(vec!["servicenow.create-record".to_owned()]);
         let args = serde_json::json!({"table": "problem"});
-        let write = GuardedCall { tool: "servicenow.create-record", arguments: &args, effect: Effect::Idempotent, scope: "t" };
-        let read = GuardedCall { tool: "servicenow.list-records", arguments: &args, effect: Effect::ReadOnly, scope: "t" };
+        let write = GuardedCall {
+            tool: "servicenow.create-record",
+            arguments: &args,
+            effect: Effect::Idempotent,
+            scope: "t",
+        };
+        let read = GuardedCall {
+            tool: "servicenow.list-records",
+            arguments: &args,
+            effect: Effect::ReadOnly,
+            scope: "t",
+        };
         let denial = guard.check(&write).expect("refused");
         assert_eq!(denial.guard, "forbidden_tools");
-        assert!(denial.reason.contains("must not be called"), "{}", denial.reason);
-        assert!(guard.check(&read).is_none(), "a read the constraint never named goes through");
+        assert!(
+            denial.reason.contains("must not be called"),
+            "{}",
+            denial.reason
+        );
+        assert!(
+            guard.check(&read).is_none(),
+            "a read the constraint never named goes through"
+        );
     }
 }

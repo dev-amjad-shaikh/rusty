@@ -54,7 +54,10 @@ impl EgressCeiling {
     /// allow-list, otherwise closed to the environment's hosts.
     pub fn boot(policy: Option<&rusty_agent_runtime::egress::EgressPolicy>) -> Self {
         let Some(policy) = policy else {
-            return Self { open: true, ..Self::default() };
+            return Self {
+                open: true,
+                ..Self::default()
+            };
         };
         let now = Utc::now();
         Self {
@@ -62,7 +65,12 @@ impl EgressCeiling {
             hosts: policy
                 .policies
                 .iter()
-                .map(|p| CeilingHost { host: p.endpoint.host.to_ascii_lowercase(), added_by: json!({"kind": "environment"}), added_at: now, note: Some("RUSTY_EGRESS_ALLOW".to_owned()) })
+                .map(|p| CeilingHost {
+                    host: p.endpoint.host.to_ascii_lowercase(),
+                    added_by: json!({"kind": "environment"}),
+                    added_at: now,
+                    note: Some("RUSTY_EGRESS_ALLOW".to_owned()),
+                })
                 .collect(),
             updated_by: None,
             updated_at: None,
@@ -77,7 +85,10 @@ impl EgressCeiling {
     /// The listed hosts that are concrete (no wildcard) — the ones an
     /// endpoint policy can name outright.
     pub fn concrete_hosts(&self) -> impl Iterator<Item = &str> {
-        self.hosts.iter().map(|h| h.host.as_str()).filter(|h| !h.starts_with("*."))
+        self.hosts
+            .iter()
+            .map(|h| h.host.as_str())
+            .filter(|h| !h.starts_with("*."))
     }
 }
 
@@ -87,7 +98,9 @@ pub fn host_matches(pattern: &str, host: &str) -> bool {
     let host = host.to_ascii_lowercase();
     let pattern = pattern.to_ascii_lowercase();
     match pattern.strip_prefix("*.") {
-        Some(suffix) => host.strip_suffix(suffix).is_some_and(|head| head.len() > 1 && head.ends_with('.')),
+        Some(suffix) => host
+            .strip_suffix(suffix)
+            .is_some_and(|head| head.len() > 1 && head.ends_with('.')),
         None => host == pattern,
     }
 }
@@ -106,18 +119,32 @@ pub fn normalize_host(raw: &str) -> Result<String, String> {
         return Err(format!("`{host}` is not a host name — no port, no spaces"));
     }
     let body = host.strip_prefix("*.").unwrap_or(&host);
-    if body.is_empty() || body.starts_with('.') || body.ends_with('.') || body.contains("..") || body.contains('*') {
+    if body.is_empty()
+        || body.starts_with('.')
+        || body.ends_with('.')
+        || body.contains("..")
+        || body.contains('*')
+    {
         return Err(format!("`{host}` is not a host name"));
     }
-    if !body.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+    if !body
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
         return Err(format!("`{host}` is not a host name"));
     }
     Ok(host)
 }
 
 /// The first of `hosts` the ceiling does not admit.
-pub fn outside<'a>(ceiling: &EgressCeiling, hosts: impl IntoIterator<Item = &'a str>) -> Option<String> {
-    hosts.into_iter().find(|h| !ceiling.fits(h)).map(str::to_owned)
+pub fn outside<'a>(
+    ceiling: &EgressCeiling,
+    hosts: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    hosts
+        .into_iter()
+        .find(|h| !ceiling.fits(h))
+        .map(str::to_owned)
 }
 
 /// The ceiling in force now.
@@ -141,13 +168,21 @@ async fn connections_in_use(state: &AppState) -> Vec<(String, String, Vec<String
         return out;
     };
     for instance in instances {
-        let Ok(Some(manifest)) = state.connectors.get_manifest(tenant, &instance.manifest_hash).await else {
+        let Ok(Some(manifest)) = state
+            .connectors
+            .get_manifest(tenant, &instance.manifest_hash)
+            .await
+        else {
             continue;
         };
         let Ok(config) = crate::connectors::opened_config(state, &context, &instance).await else {
             continue;
         };
-        out.push((instance.instance_id.clone(), manifest.display_name.clone(), crate::connectors::connection_hosts(&manifest, &config)));
+        out.push((
+            instance.instance_id.clone(),
+            manifest.display_name.clone(),
+            crate::connectors::connection_hosts(&manifest, &config),
+        ));
     }
     out
 }
@@ -158,7 +193,11 @@ async fn connections_in_use(state: &AppState) -> Vec<(String, String, Vec<String
 pub(crate) async fn restore(state: &AppState) {
     match state.server_store.get_egress_ceiling().await {
         Ok(Some(stored)) => {
-            tracing::info!(open = stored.open, hosts = stored.hosts.len(), "egress ceiling restored");
+            tracing::info!(
+                open = stored.open,
+                hosts = stored.hosts.len(),
+                "egress ceiling restored"
+            );
             set(state, stored);
             return;
         }
@@ -174,14 +213,23 @@ pub(crate) async fn restore(state: &AppState) {
         for (_, name, hosts) in connections_in_use(state).await {
             for host in hosts {
                 if !ceiling.fits(&host) {
-                    ceiling.hosts.push(CeilingHost { host, added_by: json!({"kind": "boot"}), added_at: now, note: Some(format!("in use by {name} when the ceiling was first kept")) });
+                    ceiling.hosts.push(CeilingHost {
+                        host,
+                        added_by: json!({"kind": "boot"}),
+                        added_at: now,
+                        note: Some(format!("in use by {name} when the ceiling was first kept")),
+                    });
                 }
             }
         }
     }
     ceiling.updated_at = Some(Utc::now());
     match state.server_store.put_egress_ceiling(&ceiling).await {
-        Ok(()) => tracing::info!(open = ceiling.open, hosts = ceiling.hosts.len(), "egress ceiling seeded and kept"),
+        Ok(()) => tracing::info!(
+            open = ceiling.open,
+            hosts = ceiling.hosts.len(),
+            "egress ceiling seeded and kept"
+        ),
         Err(error) => tracing::warn!(%error, "egress ceiling: seeded but not kept"),
     }
     set(state, ceiling);
@@ -199,8 +247,12 @@ async fn served(state: &AppState, ceiling: &EgressCeiling) -> Value {
     let mut unlisted: Vec<Value> = Vec::new();
     for (id, name, hosts) in &in_use {
         for host in hosts {
-            if !ceiling.hosts.iter().any(|h| host_matches(&h.host, host)) && !unlisted.iter().any(|u| u["host"] == *host) {
-                unlisted.push(json!({"host": host, "connections": [{"instance_id": id, "name": name}]}));
+            if !ceiling.hosts.iter().any(|h| host_matches(&h.host, host))
+                && !unlisted.iter().any(|u| u["host"] == *host)
+            {
+                unlisted.push(
+                    json!({"host": host, "connections": [{"instance_id": id, "name": name}]}),
+                );
             }
         }
     }
@@ -251,17 +303,36 @@ pub(crate) async fn put_ceiling(
     let by = tenant.attribution();
     let mut hosts: Vec<CeilingHost> = Vec::new();
     for entry in &input.hosts {
-        let host = normalize_host(&entry.host).map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_host", e))?;
+        let host = normalize_host(&entry.host)
+            .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_host", e))?;
         if hosts.iter().any(|h| h.host == host) {
             continue;
         }
-        let note = entry.note.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned);
+        let note = entry
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned);
         match before.hosts.iter().find(|h| h.host == host) {
-            Some(kept) => hosts.push(CeilingHost { note: note.or_else(|| kept.note.clone()), ..kept.clone() }),
-            None => hosts.push(CeilingHost { host, added_by: by.clone(), added_at: now, note }),
+            Some(kept) => hosts.push(CeilingHost {
+                note: note.or_else(|| kept.note.clone()),
+                ..kept.clone()
+            }),
+            None => hosts.push(CeilingHost {
+                host,
+                added_by: by.clone(),
+                added_at: now,
+                note,
+            }),
         }
     }
-    let ceiling = EgressCeiling { open: input.open, hosts, updated_by: Some(by), updated_at: Some(now) };
+    let ceiling = EgressCeiling {
+        open: input.open,
+        hosts,
+        updated_by: Some(by),
+        updated_at: Some(now),
+    };
     if !ceiling.open {
         for (_, name, used) in connections_in_use(&state).await {
             if let Some(host) = outside(&ceiling, used.iter().map(String::as_str)) {
@@ -275,12 +346,20 @@ pub(crate) async fn put_ceiling(
             }
         }
     }
-    state.server_store.put_egress_ceiling(&ceiling).await.map_err(ApiError::internal)?;
+    state
+        .server_store
+        .put_egress_ceiling(&ceiling)
+        .await
+        .map_err(ApiError::internal)?;
     set(&state, ceiling.clone());
     // The policy in force follows the ceiling, and the connection tools
     // with it.
     crate::connectors::refresh_connection_tools(&state).await;
-    tracing::info!(open = ceiling.open, hosts = ceiling.hosts.len(), "egress ceiling changed");
+    tracing::info!(
+        open = ceiling.open,
+        hosts = ceiling.hosts.len(),
+        "egress ceiling changed"
+    );
     Ok(Json(served(&state, &ceiling).await))
 }
 
@@ -291,7 +370,15 @@ mod tests {
     fn listed(hosts: &[&str]) -> EgressCeiling {
         EgressCeiling {
             open: false,
-            hosts: hosts.iter().map(|h| CeilingHost { host: (*h).to_owned(), added_by: json!({"kind": "test"}), added_at: Utc::now(), note: None }).collect(),
+            hosts: hosts
+                .iter()
+                .map(|h| CeilingHost {
+                    host: (*h).to_owned(),
+                    added_by: json!({"kind": "test"}),
+                    added_at: Utc::now(),
+                    note: None,
+                })
+                .collect(),
             updated_by: None,
             updated_at: None,
         }
@@ -306,17 +393,31 @@ mod tests {
         assert!(!ceiling.fits("evil-api.example.com"));
         assert!(ceiling.fits("dev12345.service-now.com"));
         assert!(ceiling.fits("a.b.service-now.com"));
-        assert!(!ceiling.fits("service-now.com"), "the bare suffix is not a subdomain");
+        assert!(
+            !ceiling.fits("service-now.com"),
+            "the bare suffix is not a subdomain"
+        );
         assert!(!ceiling.fits("notservice-now.com"));
-        assert_eq!(outside(&ceiling, ["api.example.com", "hooks.slack.com", "x.y"]), Some("hooks.slack.com".to_owned()));
-        assert_eq!(ceiling.concrete_hosts().collect::<Vec<_>>(), vec!["api.example.com"]);
+        assert_eq!(
+            outside(&ceiling, ["api.example.com", "hooks.slack.com", "x.y"]),
+            Some("hooks.slack.com".to_owned())
+        );
+        assert_eq!(
+            ceiling.concrete_hosts().collect::<Vec<_>>(),
+            vec!["api.example.com"]
+        );
     }
 
     #[test]
     fn an_open_ceiling_admits_everything_and_boot_follows_the_environment() {
         assert!(EgressCeiling::boot(None).open);
         assert!(EgressCeiling::boot(None).fits("anything.example"));
-        let env = rusty_agent_runtime::egress::EgressPolicy { policies: vec![crate::connectors::reach("operator:docs.example.com", "Docs.Example.com")] };
+        let env = rusty_agent_runtime::egress::EgressPolicy {
+            policies: vec![crate::connectors::reach(
+                "operator:docs.example.com",
+                "Docs.Example.com",
+            )],
+        };
         let booted = EgressCeiling::boot(Some(&env));
         assert!(!booted.open);
         assert_eq!(booted.hosts.len(), 1);
@@ -327,9 +428,17 @@ mod tests {
 
     #[test]
     fn a_host_is_typed_as_a_host_name() {
-        assert_eq!(normalize_host("  API.Example.com "), Ok("api.example.com".to_owned()));
-        assert_eq!(normalize_host("*.service-now.com"), Ok("*.service-now.com".to_owned()));
-        assert!(normalize_host("https://api.example.com/v1").unwrap_err().contains("URL"));
+        assert_eq!(
+            normalize_host("  API.Example.com "),
+            Ok("api.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_host("*.service-now.com"),
+            Ok("*.service-now.com".to_owned())
+        );
+        assert!(normalize_host("https://api.example.com/v1")
+            .unwrap_err()
+            .contains("URL"));
         assert!(normalize_host("api.example.com:8443").is_err());
         assert!(normalize_host("").is_err());
         assert!(normalize_host("*.").is_err());

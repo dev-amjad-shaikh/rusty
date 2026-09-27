@@ -324,10 +324,28 @@ pub(crate) fn spawn_scheduler(state: Arc<AppState>) {
 
 /// The pending approval of a run this schedule fired, if any: the fired
 /// run names its schedule in its metadata.
-async fn pending_run_of(state: &AppState, external_cron_id: &str) -> Option<crate::approvals::ApprovalRecord> {
-    for a in state.run_deps.approvals.list().into_iter().filter(|a| a.status == "pending") {
-        let Ok(Some(accepted)) = state.server_store.get_accepted_run(&a.run_id).await else { continue };
-        if accepted.payload.metadata.as_ref().and_then(|m| m.get("cron_id")).and_then(Value::as_str) == Some(external_cron_id) {
+async fn pending_run_of(
+    state: &AppState,
+    external_cron_id: &str,
+) -> Option<crate::approvals::ApprovalRecord> {
+    for a in state
+        .run_deps
+        .approvals
+        .list()
+        .into_iter()
+        .filter(|a| a.status == "pending")
+    {
+        let Ok(Some(accepted)) = state.server_store.get_accepted_run(&a.run_id).await else {
+            continue;
+        };
+        if accepted
+            .payload
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("cron_id"))
+            .and_then(Value::as_str)
+            == Some(external_cron_id)
+        {
             return Some(a);
         }
     }
@@ -365,7 +383,11 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
                 };
                 tracing::warn!(cron_id = %cron.cron_id, assistant_id = %id, "cron stalled: {why}");
                 if cron.stalled.as_deref() != Some(why.as_str()) {
-                    if let Some(who) = cron.created_by.as_ref().filter(|w| w.get("principal_id").is_some()) {
+                    if let Some(who) = cron
+                        .created_by
+                        .as_ref()
+                        .filter(|w| w.get("principal_id").is_some())
+                    {
                         crate::notices::tell_in(
                             &state.server_store,
                             tenant,
@@ -399,10 +421,17 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
     // it stops and says so — once in its row, once to the person.
     if let Some(cap) = cron.max_runs {
         if cron.runs_fired >= cap {
-            let why = format!("it has run the {cap} time{} it was allowed", if cap == 1 { "" } else { "s" });
+            let why = format!(
+                "it has run the {cap} time{} it was allowed",
+                if cap == 1 { "" } else { "s" }
+            );
             if cron.stalled.as_deref() != Some(why.as_str()) {
                 tracing::info!(cron_id = %cron.cron_id, cap, fired = cron.runs_fired, "cron stalled: run cap reached");
-                if let Some(who) = cron.created_by.as_ref().filter(|w| w.get("principal_id").is_some()) {
+                if let Some(who) = cron
+                    .created_by
+                    .as_ref()
+                    .filter(|w| w.get("principal_id").is_some())
+                {
                     crate::notices::tell_in(
                         &state.server_store,
                         tenant,
@@ -426,10 +455,17 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
     }
     if let Some(cap) = cron.max_tokens {
         if cron.tokens_spent >= cap {
-            let why = format!("it has used up its spending limit ({} of {cap} tokens)", cron.tokens_spent);
+            let why = format!(
+                "it has used up its spending limit ({} of {cap} tokens)",
+                cron.tokens_spent
+            );
             if cron.stalled.as_deref() != Some(why.as_str()) {
                 tracing::info!(cron_id = %cron.cron_id, cap, spent = cron.tokens_spent, "cron stalled: token budget spent");
-                if let Some(who) = cron.created_by.as_ref().filter(|w| w.get("principal_id").is_some()) {
+                if let Some(who) = cron
+                    .created_by
+                    .as_ref()
+                    .filter(|w| w.get("principal_id").is_some())
+                {
                     crate::notices::tell_in(
                         &state.server_store,
                         tenant,
@@ -508,7 +544,14 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
         ..RunPayload::default()
     };
     if let Some(assistant) = &assistant {
-        crate::routes::apply_assistant_defaults(&state, tenant, &internal_thread_id, assistant, &mut payload).await;
+        crate::routes::apply_assistant_defaults(
+            &state,
+            tenant,
+            &internal_thread_id,
+            assistant,
+            &mut payload,
+        )
+        .await;
     }
     let fired_at = Utc::now();
     let scheduled = runs::schedule(
@@ -548,7 +591,13 @@ async fn fire(state: Arc<AppState>, cron: CronRecord) {
                 let cron_id = cron.cron_id.clone();
                 tokio::spawn(async move {
                     let _ = terminal.wait_for(|v| v.is_some()).await;
-                    let tokens = terminal.borrow().as_ref().and_then(|v| v.get("spend")).and_then(|s| s.get("tokens")).and_then(Value::as_u64).unwrap_or(0);
+                    let tokens = terminal
+                        .borrow()
+                        .as_ref()
+                        .and_then(|v| v.get("spend"))
+                        .and_then(|s| s.get("tokens"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
                     if tokens == 0 {
                         return;
                     }
@@ -633,14 +682,19 @@ mod tests {
         let mut cron = interval_cron(3600);
         cron.created_at = now - chrono::Duration::minutes(40);
         let due = first_due(&cron, now).unwrap();
-        assert!(due > now + chrono::Duration::minutes(19) && due < now + chrono::Duration::minutes(21), "{due} vs {now}");
+        assert!(
+            due > now + chrono::Duration::minutes(19) && due < now + chrono::Duration::minutes(21),
+            "{due} vs {now}"
+        );
         // Last fired ninety minutes ago: overdue, so due now — once.
         cron.last_run_at = Some(now - chrono::Duration::minutes(90));
         assert_eq!(first_due(&cron, now).unwrap(), now);
         // Last fired ten minutes ago: fifty to go.
         cron.last_run_at = Some(now - chrono::Duration::minutes(10));
         let due = first_due(&cron, now).unwrap();
-        assert!(due > now + chrono::Duration::minutes(49) && due < now + chrono::Duration::minutes(51));
+        assert!(
+            due > now + chrono::Duration::minutes(49) && due < now + chrono::Duration::minutes(51)
+        );
         // A cron expression is its own next occurrence, boot or not.
         let mut expr = interval_cron(60);
         expr.interval_secs = None;

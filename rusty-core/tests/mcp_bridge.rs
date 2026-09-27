@@ -3,11 +3,11 @@
 //! Covers discovery parity, dispatch parity, mount-time refusal, and error
 //! paths for the in-process MCP server that exposes native Rusty tools.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::error::{Result, RustyError};
 use rusty_agent_runtime::mcp::InProcessMcpBridge;

@@ -42,10 +42,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -1253,7 +1253,7 @@ impl Tool for JournaledMcpTool {
 mod tests {
     use super::*;
     use crate::tool::ToolRegistry;
-    use tokio::io::{DuplexStream, duplex};
+    use tokio::io::{duplex, DuplexStream};
 
     /// A scripted mock MCP server speaking the full handshake.
     async fn run_mock_server(stream: DuplexStream, framing: Framing) {
@@ -1477,11 +1477,9 @@ mod tests {
 
         // Registry schemas remain OpenAI-shaped with the MCP tool inside.
         let schemas = registry.schemas();
-        assert!(
-            schemas
-                .iter()
-                .any(|s| s["function"]["name"] == json!("echo"))
-        );
+        assert!(schemas
+            .iter()
+            .any(|s| s["function"]["name"] == json!("echo")));
     }
 
     #[tokio::test]

@@ -74,10 +74,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -88,12 +95,27 @@ async fn a_deployment_that_did_not_opt_in_spawns_nothing() {
     assert_eq!(body["enabled"], false);
     assert_eq!(body["servers"].as_array().unwrap().len(), 0);
 
-    let (status, body) = call(&app, "POST", "/mcp/servers/probe", Some(json!({ "command": "true" }))).await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/mcp/servers/probe",
+        Some(json!({ "command": "true" })),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["error"], "mcp_disabled");
-    assert!(body["message"].as_str().unwrap().contains("RUSTY_MCP_STDIO=1"));
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("RUSTY_MCP_STDIO=1"));
 
-    let (status, _) = call(&app, "POST", "/mcp/servers", Some(json!({ "name": "x", "command": "true" }))).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/mcp/servers",
+        Some(json!({ "name": "x", "command": "true" })),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let _ = std::fs::remove_dir_all(store);
 }
@@ -111,7 +133,13 @@ async fn a_server_saves_only_after_it_answers_and_mounts_under_declared_effects(
     let script = script.display().to_string();
 
     // A name that is not a tool prefix, and a command that does not exist.
-    let (status, body) = call(&app, "POST", "/mcp/servers", Some(json!({ "name": "Toy", "command": &python }))).await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/mcp/servers",
+        Some(json!({ "name": "Toy", "command": &python })),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     let (status, body) = call(
         &app,
@@ -123,7 +151,11 @@ async fn a_server_saves_only_after_it_answers_and_mounts_under_declared_effects(
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert_eq!(body["error"], "mcp_failed");
     let (_, listed) = call(&app, "GET", "/mcp/servers", None).await;
-    assert_eq!(listed["servers"].as_array().unwrap().len(), 0, "a failed mount stores nothing");
+    assert_eq!(
+        listed["servers"].as_array().unwrap().len(),
+        0,
+        "a failed mount stores nothing"
+    );
 
     // Probe: the server's annotations suggest; nothing is stored.
     let (status, probed) = call(
@@ -165,15 +197,22 @@ async fn a_server_saves_only_after_it_answers_and_mounts_under_declared_effects(
     assert_eq!(mounted[0]["name"], "toy.echo");
     assert_eq!(mounted[0]["effect"], "read_only");
     assert_eq!(mounted[1]["name"], "toy.wipe");
-    assert_eq!(mounted[1]["effect"], "non_idempotent", "undeclared is a write");
+    assert_eq!(
+        mounted[1]["effect"], "non_idempotent",
+        "undeclared is a write"
+    );
     assert_eq!(mounted[1]["description"], "wipe on the toy MCP server.");
     // Secrets are served as names only.
     let env = created["env"].as_array().unwrap();
     let token = env.iter().find(|e| e["name"] == "TOY_TOKEN").unwrap();
     assert_eq!(token["secret"], true);
     assert!(token.get("value").is_none(), "{token}");
-    let stored = std::fs::read_to_string(store.join("mcp-servers").join(format!("{id}.json"))).unwrap();
-    assert!(!stored.contains("s3cret"), "the record holds ciphertext only");
+    let stored =
+        std::fs::read_to_string(store.join("mcp-servers").join(format!("{id}.json"))).unwrap();
+    assert!(
+        !stored.contains("s3cret"),
+        "the record holds ciphertext only"
+    );
 
     // The live source carries the tools; calling one reaches the process.
     let live = cell.tools();
@@ -185,7 +224,13 @@ async fn a_server_saves_only_after_it_answers_and_mounts_under_declared_effects(
     assert_eq!(answer, json!("echo:hi"));
 
     // A second server may not take the same name.
-    let (status, _) = call(&app, "POST", "/mcp/servers", Some(json!({ "name": "toy", "command": &python, "args": [&script] }))).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/mcp/servers",
+        Some(json!({ "name": "toy", "command": &python, "args": [&script] })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
     // Listing shows it mounted; deleting stops it and empties the source.

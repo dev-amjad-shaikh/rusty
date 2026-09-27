@@ -68,7 +68,9 @@ async fn options_preflight_gets_cors_headers() {
         "the requesting origin is allowed, by name"
     );
     assert_eq!(
-        headers.get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(),
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .unwrap(),
         "true",
         "a session cookie may travel"
     );

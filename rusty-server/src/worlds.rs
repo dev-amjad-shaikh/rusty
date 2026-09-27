@@ -22,7 +22,7 @@ use axum::{Extension, Json};
 use chrono::{DateTime, Duration, Utc};
 use rusty_agent_runtime::connector::{CheckRequest, CheckResponse, HttpMethod};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 
 use crate::auth::TenantContext;
@@ -517,16 +517,15 @@ fn served(record: &WorldRecord, with_rows: bool) -> Value {
                     .map(|(k, v)| {
                         (
                             k.clone(),
-                            json!(
-                                v.as_array()
-                                    .map(|rows| rows
-                                        .iter()
-                                        .rev()
-                                        .take(SHOWN_ROWS)
-                                        .cloned()
-                                        .collect::<Vec<_>>())
-                                    .unwrap_or_default()
-                            ),
+                            json!(v
+                                .as_array()
+                                .map(|rows| rows
+                                    .iter()
+                                    .rev()
+                                    .take(SHOWN_ROWS)
+                                    .cloned()
+                                    .collect::<Vec<_>>())
+                                .unwrap_or_default()),
                         )
                     })
                     .collect()
@@ -1324,14 +1323,7 @@ pub mod servicenow {
             }
             (
                 HttpMethod::Post,
-                [
-                    "api",
-                    "sn_sc",
-                    "servicecatalog",
-                    "items",
-                    sys_id,
-                    "order_now",
-                ],
+                ["api", "sn_sc", "servicecatalog", "items", sys_id, "order_now"],
             ) => order_now(state, sys_id, body),
             _ => (
                 404,
@@ -1358,7 +1350,11 @@ pub mod servicenow {
                     &field_text(a, &order.field, &all),
                     &field_text(b, &order.field, &all),
                 );
-                if order.descending { ord.reverse() } else { ord }
+                if order.descending {
+                    ord.reverse()
+                } else {
+                    ord
+                }
             });
         }
         let offset = param(query, "sysparm_offset")
@@ -2251,7 +2247,7 @@ pub mod generic {
     use chrono::Utc;
     use rusty_agent_runtime::connector::{ConnectorManifest, HttpMethod};
     use serde::{Deserialize, Serialize};
-    use serde_json::{Map, Value, json};
+    use serde_json::{json, Map, Value};
 
     /// One operation as the dialect needs it: name, method, path template.
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

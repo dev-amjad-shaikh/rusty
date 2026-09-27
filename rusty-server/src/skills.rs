@@ -360,7 +360,10 @@ fn load_removed(root: &Path) -> HashMap<(String, String), Value> {
     serde_json::from_slice::<HashMap<String, Value>>(&bytes)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|(key, mark)| key.split_once('/').map(|(t, n)| ((t.to_owned(), n.to_owned()), mark)))
+        .filter_map(|(key, mark)| {
+            key.split_once('/')
+                .map(|(t, n)| ((t.to_owned(), n.to_owned()), mark))
+        })
         .collect()
 }
 
@@ -377,7 +380,10 @@ fn load_current(root: &Path) -> HashMap<(String, String), u64> {
         return HashMap::new();
     };
     map.into_iter()
-        .filter_map(|(key, rev)| key.split_once('/').map(|(t, n)| ((t.to_owned(), n.to_owned()), rev)))
+        .filter_map(|(key, rev)| {
+            key.split_once('/')
+                .map(|(t, n)| ((t.to_owned(), n.to_owned()), rev))
+        })
         .collect()
 }
 
@@ -473,18 +479,29 @@ impl SkillPlane {
     /// unjudged registration) set it, else the latest.
     pub(crate) async fn resolve(&self, tenant: &str, name: &str) -> Option<Arc<SkillVersion>> {
         match self.current_revision(tenant, name).await {
-            Some(revision) => self.get_version(tenant, name, SkillVersionSelector::Revision(revision)).await,
+            Some(revision) => {
+                self.get_version(tenant, name, SkillVersionSelector::Revision(revision))
+                    .await
+            }
             None => self.get(tenant, name).await,
         }
     }
 
     pub(crate) async fn current_revision(&self, tenant: &str, name: &str) -> Option<u64> {
-        self.current.lock().await.get(&(tenant.to_owned(), name.to_owned())).copied()
+        self.current
+            .lock()
+            .await
+            .get(&(tenant.to_owned(), name.to_owned()))
+            .copied()
     }
 
     /// Whether a person took this skill out of the library (who and when).
     pub(crate) async fn removed(&self, tenant: &str, name: &str) -> Option<Value> {
-        self.removed.lock().await.get(&(tenant.to_owned(), name.to_owned())).cloned()
+        self.removed
+            .lock()
+            .await
+            .get(&(tenant.to_owned(), name.to_owned()))
+            .cloned()
     }
 
     /// Take a skill out of the library, or (`None`) put it back; kept.
@@ -498,7 +515,10 @@ impl SkillPlane {
         if !changed {
             return;
         }
-        let map: HashMap<String, Value> = removed.iter().map(|((t, n), m)| (format!("{t}/{n}"), m.clone())).collect();
+        let map: HashMap<String, Value> = removed
+            .iter()
+            .map(|((t, n), m)| (format!("{t}/{n}"), m.clone()))
+            .collect();
         drop(removed);
         let path = removed_path(&self.root);
         if let Ok(bytes) = serde_json::to_vec_pretty(&map) {
@@ -513,7 +533,10 @@ impl SkillPlane {
     pub(crate) async fn set_current(&self, tenant: &str, name: &str, revision: u64) {
         let mut current = self.current.lock().await;
         current.insert((tenant.to_owned(), name.to_owned()), revision);
-        let map: HashMap<String, u64> = current.iter().map(|((t, n), r)| (format!("{t}/{n}"), *r)).collect();
+        let map: HashMap<String, u64> = current
+            .iter()
+            .map(|((t, n), r)| (format!("{t}/{n}"), *r))
+            .collect();
         drop(current);
         let path = current_path(&self.root);
         if let Some(dir) = path.parent() {
@@ -594,7 +617,8 @@ impl SkillPlane {
         }
         drop(tenants);
         // Registering a removed skill's name is a person asking for it back.
-        self.set_removed(tenant, registration.version.name(), None).await;
+        self.set_removed(tenant, registration.version.name(), None)
+            .await;
         Ok(registration)
     }
 
@@ -603,10 +627,15 @@ impl SkillPlane {
     pub(crate) async fn list(&self, tenant: &str) -> Vec<SkillMetadata> {
         let all = {
             let tenants = self.tenants.lock().await;
-            tenants.get(tenant).map(SkillRegistry::list).unwrap_or_default()
+            tenants
+                .get(tenant)
+                .map(SkillRegistry::list)
+                .unwrap_or_default()
         };
         let removed = self.removed.lock().await;
-        all.into_iter().filter(|meta| !removed.contains_key(&(tenant.to_owned(), meta.name.clone()))).collect()
+        all.into_iter()
+            .filter(|meta| !removed.contains_key(&(tenant.to_owned(), meta.name.clone())))
+            .collect()
     }
 
     /// The latest version of one skill in the caller's tenant.
@@ -786,7 +815,13 @@ pub(crate) async fn register_skill(
             let mut receipt = version_receipt(&registration.version);
             receipt["already_registered"] = json!(registration.already_registered);
             if !registration.already_registered {
-                let (gate, held, current) = after_registration(&state, &tenant, registration.version.name(), registration.version.revision()).await;
+                let (gate, held, current) = after_registration(
+                    &state,
+                    &tenant,
+                    registration.version.name(),
+                    registration.version.revision(),
+                )
+                .await;
                 receipt["gate"] = json!(gate);
                 receipt["held"] = json!(held);
                 receipt["current"] = json!(current);
@@ -809,7 +844,12 @@ pub(crate) async fn register_skill(
 /// revision is *held* — the current one keeps running — until a promotion
 /// with that evidence (or an admin's recorded word). A skill nothing can
 /// judge becomes current at once. Returns (gate, held, current).
-pub(crate) async fn after_registration(state: &Arc<AppState>, tenant: &TenantContext, skill: &str, revision: u64) -> (Vec<Value>, bool, u64) {
+pub(crate) async fn after_registration(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    skill: &str,
+    revision: u64,
+) -> (Vec<Value>, bool, u64) {
     let gate = gate_followers(state, tenant, skill, revision).await;
     // Held when any follower has a suite — even one that could not start
     // (the gate fails closed; an admin's word is the way past it). A first
@@ -819,11 +859,22 @@ pub(crate) async fn after_registration(state: &Arc<AppState>, tenant: &TenantCon
             Some(current) if current != revision => current,
             _ => revision.saturating_sub(1).max(1),
         };
-        state.skills.set_current(tenant.tenant(), skill, previous).await;
-        tracing::info!(skill, revision, current = previous, "skill revision held: its followers' suites judge it first");
+        state
+            .skills
+            .set_current(tenant.tenant(), skill, previous)
+            .await;
+        tracing::info!(
+            skill,
+            revision,
+            current = previous,
+            "skill revision held: its followers' suites judge it first"
+        );
         (gate, true, previous)
     } else {
-        state.skills.set_current(tenant.tenant(), skill, revision).await;
+        state
+            .skills
+            .set_current(tenant.tenant(), skill, revision)
+            .await;
         (gate, false, revision)
     }
 }
@@ -838,12 +889,17 @@ pub(crate) struct JudgedFollower {
     pub cases: Vec<crate::evaluations::PublishedEvalCase>,
 }
 
-pub(crate) async fn judged_followers(state: &Arc<AppState>, tenant: &TenantContext, skill: &str) -> Vec<JudgedFollower> {
+pub(crate) async fn judged_followers(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    skill: &str,
+) -> Vec<JudgedFollower> {
     let mut out = Vec::new();
     let Ok(views) = state.server_store.list_assistants().await else {
         return out;
     };
-    let Ok(catalog) = crate::evaluations::list_datasets(&state.server_store, tenant.tenant()).await else {
+    let Ok(catalog) = crate::evaluations::list_datasets(&state.server_store, tenant.tenant()).await
+    else {
         return out;
     };
     // The catalog lists every version; a suite is its dataset's newest one.
@@ -862,17 +918,34 @@ pub(crate) async fn judged_followers(state: &Arc<AppState>, tenant: &TenantConte
         let Ok(Some(record)) = state.server_store.get_assistant(&view.assistant_id).await else {
             continue;
         };
-        if record.archived_at.is_some() || !crate::routes::assistant_skills(&record.config).iter().any(|s| s == skill) {
+        if record.archived_at.is_some()
+            || !crate::routes::assistant_skills(&record.config)
+                .iter()
+                .any(|s| s == skill)
+        {
             continue;
         }
         for dataset in &newest {
-            let Ok(cases) = crate::evaluations::load_dataset_cases(&state.server_store, tenant.tenant(), &dataset.name, &dataset.version).await else {
+            let Ok(cases) = crate::evaluations::load_dataset_cases(
+                &state.server_store,
+                tenant.tenant(),
+                &dataset.name,
+                &dataset.version,
+            )
+            .await
+            else {
                 continue;
             };
             if !cases.iter().any(|case| case.source.agent_id == external) {
                 continue;
             }
-            out.push(JudgedFollower { assistant_id: external.clone(), record: record.clone(), dataset: dataset.name.clone(), version: dataset.version.clone(), cases });
+            out.push(JudgedFollower {
+                assistant_id: external.clone(),
+                record: record.clone(),
+                dataset: dataset.name.clone(),
+                version: dataset.version.clone(),
+                cases,
+            });
         }
     }
     out
@@ -917,19 +990,46 @@ pub(crate) async fn gate_followers(
 
 /// The gate's view of one revision: every judged follower's latest
 /// evaluation pinned to it.
-pub(crate) async fn skill_evidence(state: &Arc<AppState>, tenant: &TenantContext, skill: &str, revision: u64) -> Value {
+pub(crate) async fn skill_evidence(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    skill: &str,
+    revision: u64,
+) -> Value {
     let mut suites = Vec::new();
     for follower in judged_followers(state, tenant, skill).await {
-        let evaluations = crate::dataset_runs::list(state, tenant.tenant(), &follower.dataset, &follower.version).await.unwrap_or_default();
+        let evaluations =
+            crate::dataset_runs::list(state, tenant.tenant(), &follower.dataset, &follower.version)
+                .await
+                .unwrap_or_default();
         let mine = evaluations.iter().find(|e| {
             e.assistant_id == follower.assistant_id
                 && e.status != "error"
-                && crate::dataset_runs::skill_pin(e.started_by.as_ref()).is_some_and(|(n, r)| n == skill && r == revision)
+                && crate::dataset_runs::skill_pin(e.started_by.as_ref())
+                    .is_some_and(|(n, r)| n == skill && r == revision)
         });
         let (state_word, evaluation_id, passed, total, at) = match mine {
-            Some(e) if e.status == "running" => ("running", Some(e.evaluation_id.clone()), e.passed, e.total, None),
-            Some(e) if e.total > 0 && e.passed == e.total => ("passed", Some(e.evaluation_id.clone()), e.passed, e.total, e.finished_at),
-            Some(e) => ("failed", Some(e.evaluation_id.clone()), e.passed, e.total, e.finished_at),
+            Some(e) if e.status == "running" => (
+                "running",
+                Some(e.evaluation_id.clone()),
+                e.passed,
+                e.total,
+                None,
+            ),
+            Some(e) if e.total > 0 && e.passed == e.total => (
+                "passed",
+                Some(e.evaluation_id.clone()),
+                e.passed,
+                e.total,
+                e.finished_at,
+            ),
+            Some(e) => (
+                "failed",
+                Some(e.evaluation_id.clone()),
+                e.passed,
+                e.total,
+                e.finished_at,
+            ),
             None => ("missing", None, 0, follower.cases.len(), None),
         };
         suites.push(json!({
@@ -978,7 +1078,11 @@ pub(crate) async fn get_skill(
         .ok_or_else(|| ApiError::not_found(format!("skill `{name}` not found")))?;
     let mut receipt = version_receipt(&version);
     receipt["revisions"] = json!(state.skills.history(tenant.tenant(), &name).await.len());
-    let current = state.skills.current_revision(tenant.tenant(), &name).await.unwrap_or(version.revision());
+    let current = state
+        .skills
+        .current_revision(tenant.tenant(), &name)
+        .await
+        .unwrap_or(version.revision());
     receipt["current"] = json!(current);
     receipt["latest"] = json!(version.revision());
     receipt["candidate"] = json!((version.revision() > current).then_some(version.revision()));
@@ -998,7 +1102,9 @@ pub(crate) async fn remove_skill(
     Extension(tenant): Extension<TenantContext>,
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<Value>, ApiError> {
-    if state.skills.get(tenant.tenant(), &name).await.is_none() || state.skills.removed(tenant.tenant(), &name).await.is_some() {
+    if state.skills.get(tenant.tenant(), &name).await.is_none()
+        || state.skills.removed(tenant.tenant(), &name).await.is_some()
+    {
         return Err(ApiError::not_found(format!("skill `{name}` not found")));
     }
     let users = agents_using(&state, &tenant, &name).await;
@@ -1008,10 +1114,21 @@ pub(crate) async fn remove_skill(
             [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
             [] => unreachable!(),
         };
-        return Err(ApiError::conflict(format!("{names} still use{} this skill — take it off {} first", if users.len() == 1 { "s" } else { "" }, if users.len() == 1 { "that agent" } else { "them" })));
+        return Err(ApiError::conflict(format!(
+            "{names} still use{} this skill — take it off {} first",
+            if users.len() == 1 { "s" } else { "" },
+            if users.len() == 1 {
+                "that agent"
+            } else {
+                "them"
+            }
+        )));
     }
     let mark = json!({"removed_by": tenant.principal().name, "removed_at": chrono::Utc::now()});
-    state.skills.set_removed(tenant.tenant(), &name, Some(mark.clone())).await;
+    state
+        .skills
+        .set_removed(tenant.tenant(), &name, Some(mark.clone()))
+        .await;
     Ok(Json(json!({"name": name, "removed": mark})))
 }
 
@@ -1033,9 +1150,19 @@ async fn agents_using(state: &Arc<AppState>, tenant: &TenantContext, skill: &str
         if record.archived_at.is_some() {
             continue;
         }
-        let names = |config: &Value| crate::routes::assistant_skills(config).iter().any(|s| s == skill);
-        let served = record.active_version_id.as_deref().and_then(|id| record.versions.iter().find(|v| v.version_id == id));
-        if names(&record.config) || record.versions.last().is_some_and(|v| names(&v.config)) || served.is_some_and(|v| names(&v.config)) {
+        let names = |config: &Value| {
+            crate::routes::assistant_skills(config)
+                .iter()
+                .any(|s| s == skill)
+        };
+        let served = record
+            .active_version_id
+            .as_deref()
+            .and_then(|id| record.versions.iter().find(|v| v.version_id == id));
+        if names(&record.config)
+            || record.versions.last().is_some_and(|v| names(&v.config))
+            || served.is_some_and(|v| names(&v.config))
+        {
             out.push(record.name.clone());
         }
     }
@@ -1052,12 +1179,22 @@ pub(crate) async fn get_skill_evidence(
     AxumPath(name): AxumPath<String>,
     axum::extract::Query(query): axum::extract::Query<EvidenceQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let latest = state.skills.get(tenant.tenant(), &name).await.ok_or_else(|| ApiError::not_found(format!("skill `{name}` not found")))?;
+    let latest = state
+        .skills
+        .get(tenant.tenant(), &name)
+        .await
+        .ok_or_else(|| ApiError::not_found(format!("skill `{name}` not found")))?;
     let revision = query.revision.unwrap_or(latest.revision());
-    let current = state.skills.current_revision(tenant.tenant(), &name).await.unwrap_or(latest.revision());
+    let current = state
+        .skills
+        .current_revision(tenant.tenant(), &name)
+        .await
+        .unwrap_or(latest.revision());
     let evidence = skill_evidence(&state, &tenant, &name, revision).await;
     let promotions = skill_promotions(&state, tenant.tenant(), &name).await;
-    Ok(Json(json!({"name": name, "current": current, "latest": latest.revision(), "evidence": evidence, "promotions": promotions})))
+    Ok(Json(
+        json!({"name": name, "current": current, "latest": latest.revision(), "evidence": evidence, "promotions": promotions}),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1085,7 +1222,11 @@ async fn record_skill_promotion(state: &AppState, tenant: &str, name: &str, prom
     let mut all = skill_promotions(state, tenant, name).await;
     all.insert(0, promotion);
     all.truncate(50);
-    if let Err(error) = state.server_store.kv_put(&promotions_namespace(tenant), name, Value::Array(all)).await {
+    if let Err(error) = state
+        .server_store
+        .kv_put(&promotions_namespace(tenant), name, Value::Array(all))
+        .await
+    {
         tracing::warn!(%error, skill = %name, "skill promotion not kept");
     }
 }
@@ -1212,18 +1353,40 @@ pub(crate) async fn promote_skill(
 
     // The gate: every judged follower's suite, evaluated pinned to this
     // revision, passed — or an admin's recorded word past it.
-    if state.skills.get_version(tenant.tenant(), &name, SkillVersionSelector::Revision(revision)).await.is_none() {
-        return ApiError::not_found(format!("skill `{name}` revision {revision} not found")).into_response();
+    if state
+        .skills
+        .get_version(
+            tenant.tenant(),
+            &name,
+            SkillVersionSelector::Revision(revision),
+        )
+        .await
+        .is_none()
+    {
+        return ApiError::not_found(format!("skill `{name}` revision {revision} not found"))
+            .into_response();
     }
     let evidence = skill_evidence(&state, &tenant, &name, revision).await;
-    let override_reason = payload.override_reason.as_deref().map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned);
+    let override_reason = payload
+        .override_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(str::to_owned);
     if evidence["ok"] != json!(true) && override_reason.is_none() {
         let short: Vec<String> = evidence["suites"]
             .as_array()
             .into_iter()
             .flatten()
             .filter(|s| s["state"] != "passed")
-            .map(|s| format!("{} on {} ({})", s["assistant"].as_str().unwrap_or("?"), s["dataset"].as_str().unwrap_or("?"), s["state"].as_str().unwrap_or("?")))
+            .map(|s| {
+                format!(
+                    "{} on {} ({})",
+                    s["assistant"].as_str().unwrap_or("?"),
+                    s["dataset"].as_str().unwrap_or("?"),
+                    s["state"].as_str().unwrap_or("?")
+                )
+            })
             .collect();
         return ApiError::new(
             StatusCode::CONFLICT,
@@ -1233,7 +1396,10 @@ pub(crate) async fn promote_skill(
         .with("evidence", evidence)
         .into_response();
     }
-    state.skills.set_current(tenant.tenant(), &name, revision).await;
+    state
+        .skills
+        .set_current(tenant.tenant(), &name, revision)
+        .await;
     let promotion = json!({
         "revision": revision,
         "by": tenant.attribution(),
@@ -1243,7 +1409,11 @@ pub(crate) async fn promote_skill(
     });
     record_skill_promotion(&state, tenant.tenant(), &name, promotion.clone()).await;
     tracing::info!(skill = %name, revision, "skill revision promoted: its followers run it now");
-    (StatusCode::OK, Json(json!({"name": name, "current": revision, "promoted": true, "promotion": promotion}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"name": name, "current": revision, "promoted": true, "promotion": promotion})),
+    )
+        .into_response()
 }
 /// `POST /skills/invalidate` payload.
 #[derive(Debug, Deserialize)]
@@ -1500,5 +1670,4 @@ mod tests {
     // ----------------------------------------------------------------- //
     // Promotion gates
     // ----------------------------------------------------------------- //
-
 }

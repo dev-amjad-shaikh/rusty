@@ -1,9 +1,9 @@
 //! Integration tests for the L7 egress policy evaluator (EP-11-S03).
 
 use rusty_agent_runtime::egress::{
-    EgressDecision, EgressDenialReason, EgressEndpoint, EgressEndpointPolicy, EgressPolicy,
-    EgressProtocol, EgressRewrite, EgressRule, EgressRuleMode, PreflightResult, canonicalize_path,
-    evaluate_egress, evaluate_redirect, preflight_egress,
+    canonicalize_path, evaluate_egress, evaluate_redirect, preflight_egress, EgressDecision,
+    EgressDenialReason, EgressEndpoint, EgressEndpointPolicy, EgressPolicy, EgressProtocol,
+    EgressRewrite, EgressRule, EgressRuleMode, PreflightResult,
 };
 
 fn sample_policy() -> EgressPolicy {
@@ -388,12 +388,10 @@ fn validation_missing_leading_slash() {
             originating: vec![],
         }],
     };
-    assert!(
-        policy
-            .validate()
-            .unwrap()
-            .contains("path_pattern must start with")
-    );
+    assert!(policy
+        .validate()
+        .unwrap()
+        .contains("path_pattern must start with"));
 }
 
 #[test]
@@ -440,12 +438,10 @@ fn validation_duplicate_originating() {
             originating: vec!["a".into(), "a".into()],
         }],
     };
-    assert!(
-        policy
-            .validate()
-            .unwrap()
-            .contains("originating contains duplicates")
-    );
+    assert!(policy
+        .validate()
+        .unwrap()
+        .contains("originating contains duplicates"));
 }
 
 #[test]
@@ -660,10 +656,8 @@ fn validation_bad_allowed_ip() {
             originating: vec![],
         }],
     };
-    assert!(
-        policy
-            .validate()
-            .unwrap()
-            .contains("not a valid IP address")
-    );
+    assert!(policy
+        .validate()
+        .unwrap()
+        .contains("not a valid IP address"));
 }

@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::llm::Usage;
+use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::builtins::CalculatorTool;
 use rusty_agent_server::{router, GraphRegistry, ServerConfig};
 use serde_json::{json, Value};
@@ -40,7 +40,12 @@ impl ChatModel for MeteredModel {
         Ok(ChatResponse {
             message,
             model: Some("metered-test".into()),
-            usage: Some(Usage { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60, ..Usage::default() }),
+            usage: Some(Usage {
+                prompt_tokens: 50,
+                completion_tokens: 10,
+                total_tokens: 60,
+                ..Usage::default()
+            }),
         })
     }
 }
@@ -49,10 +54,18 @@ fn test_app() -> (Router, PathBuf) {
     let store = std::env::temp_dir().join(format!("rusty-run-budget-{}", uuid::Uuid::new_v4()));
     let mut tools = ToolRegistry::new();
     tools.register(CalculatorTool);
-    let graph = create_react_agent(Arc::new(MeteredModel { calls: AtomicUsize::new(0) }), tools.clone()).unwrap();
+    let graph = create_react_agent(
+        Arc::new(MeteredModel {
+            calls: AtomicUsize::new(0),
+        }),
+        tools.clone(),
+    )
+    .unwrap();
     let spec = StateSpec::new().channel("messages", Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("capable", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("capable", graph, spec, &tools)
+        .unwrap();
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.clone());
     (router(registry, config), store)
 }
@@ -66,10 +79,18 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes: Bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
     (status, value)
 }
 
@@ -116,24 +137,44 @@ async fn a_run_stops_at_the_step_that_crosses_the_agents_budget_and_says_what_it
     assert_eq!(terminal["status"], "error", "{terminal}");
     assert_eq!(terminal["error"], "budget_exhausted", "{terminal}");
     let message = terminal["message"].as_str().unwrap();
-    assert!(message.contains("120 tokens spent against a limit of 100"), "{message}");
+    assert!(
+        message.contains("120 tokens spent against a limit of 100"),
+        "{message}"
+    );
     assert_eq!(terminal["spend"]["tokens"], 120, "{terminal}");
     assert_eq!(terminal["spend"]["requests"], 2, "{terminal}");
-    assert!(terminal["spend"]["cost_usd"].is_null(), "an unpriced model journals no cost: {terminal}");
+    assert!(
+        terminal["spend"]["cost_usd"].is_null(),
+        "an unpriced model journals no cost: {terminal}"
+    );
 
     // The run declared its budget.
     let run_id = terminal["run_id"].as_str().unwrap();
     let (status, events) = call(&app, "GET", &format!("/runs/{run_id}/events"), None).await;
     assert_eq!(status, StatusCode::OK, "{events}");
-    let declared = events["events"].as_array().unwrap().iter().find(|e| e["kind"] == "run_config_declared").expect("declared");
-    assert_eq!(declared.pointer("/output/value/budget/max_tokens"), Some(&json!(100)), "{declared}");
+    let declared = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "run_config_declared")
+        .expect("declared");
+    assert_eq!(
+        declared.pointer("/output/value/budget/max_tokens"),
+        Some(&json!(100)),
+        "{declared}"
+    );
     let _ = std::fs::remove_dir_all(store);
 }
 
 #[tokio::test]
 async fn a_run_under_budget_finishes_with_its_spend_on_the_terminal() {
     let (app, store) = test_app();
-    create_assistant(&app, "thrifty", json!({"max_tokens": 1000, "max_cost_usd": 0.5})).await;
+    create_assistant(
+        &app,
+        "thrifty",
+        json!({"max_tokens": 1000, "max_cost_usd": 0.5}),
+    )
+    .await;
     let thread = create_thread(&app).await;
     let (status, terminal) = call(
         &app,
@@ -161,6 +202,12 @@ async fn a_zero_bound_is_refused_at_admission() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(body["message"].as_str().unwrap().contains("max_tokens` is 0"), "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_tokens` is 0"),
+        "{body}"
+    );
     let _ = std::fs::remove_dir_all(store);
 }

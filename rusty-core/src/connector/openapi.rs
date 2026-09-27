@@ -178,7 +178,13 @@ pub fn import_openapi(spec: &Value) -> Result<OpenApiImport> {
                 }
             };
 
-            match map_operation(spec, path, http_method, operation_value, path_item.get("parameters")) {
+            match map_operation(
+                spec,
+                path,
+                http_method,
+                operation_value,
+                path_item.get("parameters"),
+            ) {
                 Ok(op) => mapped.push(op),
                 Err(reason) => unmapped.push(UnmappedOperation {
                     path: path.clone(),
@@ -227,7 +233,11 @@ fn map_operation(
     let operation_id = match operation.get("operationId").and_then(Value::as_str) {
         Some(id) => id,
         None => {
-            derived = format!("{} {}", method_word(method), path.replace(['{', '}'], "").replace('/', " "));
+            derived = format!(
+                "{} {}",
+                method_word(method),
+                path.replace(['{', '}'], "").replace('/', " ")
+            );
             &derived
         }
     };
@@ -263,7 +273,10 @@ fn map_operation(
     // `components` and point at them: a `$ref` is followed, and so is one
     // inside a parameter's schema, so the tool's schema stands alone.
     let mut all_params: Vec<Value> = Vec::new();
-    for params in [path_params, operation.get("parameters")].into_iter().flatten() {
+    for params in [path_params, operation.get("parameters")]
+        .into_iter()
+        .flatten()
+    {
         if let Some(params) = params.as_array() {
             all_params.extend(params.iter().map(|p| resolve_refs(spec, p, 0)));
         }
@@ -289,7 +302,9 @@ fn map_operation(
             "path" | "query" => {
                 if let Some(schema) = resolve_schema(param_obj, param) {
                     properties.insert(param_name.clone(), schema.clone());
-                    if param_obj.get("required").and_then(Value::as_bool) == Some(true) && !required.contains(&param_name) {
+                    if param_obj.get("required").and_then(Value::as_bool) == Some(true)
+                        && !required.contains(&param_name)
+                    {
                         required.push(param_name);
                     }
                 }
@@ -312,7 +327,9 @@ fn map_operation(
     }
 
     // Merge request body schema into params_schema.
-    if let Some(body_schema) = extract_request_body_schema(operation).map(|schema| resolve_refs(spec, &schema, 0)) {
+    if let Some(body_schema) =
+        extract_request_body_schema(operation).map(|schema| resolve_refs(spec, &schema, 0))
+    {
         if let Some(body_props) = body_schema.get("properties").and_then(Value::as_object) {
             for (key, val) in body_props {
                 properties.insert(key.clone(), val.clone());
@@ -382,14 +399,23 @@ fn resolve_refs(spec: &Value, value: &Value, depth: usize) -> Value {
                 if depth >= MAX_REF_DEPTH {
                     return Value::Object(serde_json::Map::new());
                 }
-                return match reference.strip_prefix('#').and_then(|pointer| spec.pointer(pointer)) {
+                return match reference
+                    .strip_prefix('#')
+                    .and_then(|pointer| spec.pointer(pointer))
+                {
                     Some(target) => resolve_refs(spec, target, depth + 1),
                     None => Value::Object(serde_json::Map::new()),
                 };
             }
-            Value::Object(map.iter().map(|(k, v)| (k.clone(), resolve_refs(spec, v, depth))).collect())
+            Value::Object(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), resolve_refs(spec, v, depth)))
+                    .collect(),
+            )
         }
-        Value::Array(items) => Value::Array(items.iter().map(|v| resolve_refs(spec, v, depth)).collect()),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| resolve_refs(spec, v, depth)).collect())
+        }
         other => other.clone(),
     }
 }
@@ -475,11 +501,18 @@ mod tests {
         let imported = import_openapi(&spec).unwrap();
         let op = &imported.mapped[0];
         let props = op.params_schema["properties"].as_object().unwrap();
-        assert_eq!(props["wfo"]["enum"], serde_json::json!(["SEW", "OKX"]), "a parameter's schema reference is followed");
+        assert_eq!(
+            props["wfo"]["enum"],
+            serde_json::json!(["SEW", "OKX"]),
+            "a parameter's schema reference is followed"
+        );
         for name in ["wfo", "x", "y", "units"] {
             assert!(props.contains_key(name), "{name} is a property: {props:?}");
         }
-        assert_eq!(op.params_schema["required"], serde_json::json!(["wfo", "x", "y"]));
+        assert_eq!(
+            op.params_schema["required"],
+            serde_json::json!(["wfo", "x", "y"])
+        );
     }
 
     #[test]
@@ -491,7 +524,11 @@ mod tests {
         let imported = import_openapi(&spec).unwrap();
         assert_eq!(imported.mapped.len(), 1);
         assert!(imported.mapped[0].headers.is_empty());
-        assert!(imported.unmapped[0].reason.contains("X-Tenant"), "{:?}", imported.unmapped);
+        assert!(
+            imported.unmapped[0].reason.contains("X-Tenant"),
+            "{:?}",
+            imported.unmapped
+        );
     }
 
     #[test]

@@ -21,7 +21,11 @@ struct Brief;
 #[async_trait::async_trait]
 impl ChatModel for Brief {
     async fn chat(&self, _messages: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("noted"), model: Some("brief".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("noted"),
+            model: Some("brief".into()),
+            usage: None,
+        })
     }
 }
 
@@ -34,7 +38,9 @@ fn app(config: ServerConfig) -> Router {
     let graph = create_react_agent(Arc::new(Brief), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
     router(registry, config)
 }
 
@@ -47,10 +53,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -65,7 +78,13 @@ async fn the_estate_is_backed_up_running_and_restored_onto_an_empty_store() {
     assert_eq!(status, StatusCode::CREATED, "{made}");
     let (status, skill) = call(&app_a, "POST", "/skills", Some(json!({"skill_md": "---\nname: count-well\ndescription: How to count.\n---\n\n# Count well\n\nCount, then say the number.\n"}))).await;
     assert_eq!(status, StatusCode::CREATED, "{skill}");
-    let (_, thread) = call(&app_a, "POST", "/threads", Some(json!({"graph": "react_agent"}))).await;
+    let (_, thread) = call(
+        &app_a,
+        "POST",
+        "/threads",
+        Some(json!({"graph": "react_agent"})),
+    )
+    .await;
     let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
     let (status, run) = call(&app_a, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(json!({"input": {"messages": [{"role": "user", "content": "how many?"}]}, "assistant_id": "desk"}))).await;
     assert_eq!(status, StatusCode::OK, "{run}");
@@ -90,8 +109,15 @@ async fn the_estate_is_backed_up_running_and_restored_onto_an_empty_store() {
     assert_eq!(backup["manifest"]["counts"], estate["counts"], "{backup}");
     assert_eq!(backup["manifest"]["by"]["principal_id"], json!("dev"));
     let (_, estate) = call(&app_a, "GET", "/estate", None).await;
-    assert_eq!(estate["backups"][0]["path"], json!(archive), "the backup is listed: {estate}");
-    assert_eq!(estate["backups"][0]["manifest"]["counts"]["agents"], json!(1));
+    assert_eq!(
+        estate["backups"][0]["path"],
+        json!(archive),
+        "the backup is listed: {estate}"
+    );
+    assert_eq!(
+        estate["backups"][0]["manifest"]["counts"]["agents"],
+        json!(1)
+    );
 
     // A second deployment on an empty store, restored from it: the same
     // estate through the same API — the agent, the skill, the run, the thread.
@@ -100,8 +126,16 @@ async fn the_estate_is_backed_up_running_and_restored_onto_an_empty_store() {
     let (status, estate_b) = call(&app_b, "GET", "/estate", None).await;
     assert_eq!(status, StatusCode::OK, "{estate_b}");
     assert_eq!(estate_b["counts"], estate["counts"], "{estate_b}");
-    assert_eq!(estate_b["restored_from"]["archive"], json!(archive), "{estate_b}");
-    assert_eq!(estate_b["restore"]["outcome"], json!("restored"), "{estate_b}");
+    assert_eq!(
+        estate_b["restored_from"]["archive"],
+        json!(archive),
+        "{estate_b}"
+    );
+    assert_eq!(
+        estate_b["restore"]["outcome"],
+        json!("restored"),
+        "{estate_b}"
+    );
     let (status, desk) = call(&app_b, "GET", "/assistants/desk", None).await;
     assert_eq!(status, StatusCode::OK, "{desk}");
     assert_eq!(desk["name"], json!("Desk"));
@@ -109,7 +143,11 @@ async fn the_estate_is_backed_up_running_and_restored_onto_an_empty_store() {
     assert_eq!(status, StatusCode::OK, "{skill}");
     assert_eq!(skill["revision"], json!(1));
     let (status, run) = call(&app_b, "GET", &format!("/runs/{run_id}"), None).await;
-    assert_eq!(status, StatusCode::OK, "the run is recalled from its record: {run}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the run is recalled from its record: {run}"
+    );
     assert_eq!(run["status"], json!("success"));
     let (status, thread) = call(&app_b, "GET", &format!("/threads/{thread_id}"), None).await;
     assert_eq!(status, StatusCode::OK, "{thread}");
@@ -135,9 +173,14 @@ fn a_restore_into_a_store_that_holds_anything_is_skipped_and_says_why() {
     std::fs::write(&archive, b"not even an archive").unwrap();
     let outcome = rusty_agent_server::estate::restore_if_asked(&store, Some(&archive)).unwrap();
     match outcome {
-        rusty_agent_server::estate::RestoreOutcome::Skipped { reason, .. } => assert!(reason.contains("not empty"), "{reason}"),
+        rusty_agent_server::estate::RestoreOutcome::Skipped { reason, .. } => {
+            assert!(reason.contains("not empty"), "{reason}")
+        }
         other => panic!("{other:?}"),
     }
-    assert!(store.join("assistants").join("desk.json").exists(), "the estate stands");
+    assert!(
+        store.join("assistants").join("desk.json").exists(),
+        "the estate stands"
+    );
     let _ = std::fs::remove_dir_all(root);
 }

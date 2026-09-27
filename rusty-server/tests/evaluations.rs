@@ -384,7 +384,11 @@ async fn dataset_is_immutable_provenanced_and_restart_durable() {
     let (status, listed) = call(&restarted, "GET", "/datasets", None).await;
     assert_eq!(status, StatusCode::OK, "restart list: {listed}");
     assert_eq!(listed["datasets"].as_array().unwrap().len(), 1);
-    assert_eq!(listed["datasets"][0]["agent_id"], json!("assistant-support"), "a listing says whose dataset it is: {listed}");
+    assert_eq!(
+        listed["datasets"][0]["agent_id"],
+        json!("assistant-support"),
+        "a listing says whose dataset it is: {listed}"
+    );
     let (status, cases) = call(
         &restarted,
         "GET",

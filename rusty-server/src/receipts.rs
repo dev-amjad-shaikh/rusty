@@ -170,7 +170,11 @@ pub(crate) fn load_key_records(root: &Path) -> Vec<ReceiptKeyRecord> {
         // The vault keeps a forgotten person's tombstone beside the keys
         // (`<stem>.forgotten.json`); it is not a key record and not a
         // problem, so it is passed over without a word.
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".forgotten.json")) {
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".forgotten.json"))
+        {
             continue;
         }
         match std::fs::read(&path)

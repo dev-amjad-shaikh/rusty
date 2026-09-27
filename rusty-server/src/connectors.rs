@@ -43,8 +43,8 @@ use std::sync::Arc;
 
 use axum::extract::{Path as AxumPath, State as AxumState};
 use axum::http::StatusCode;
-use axum::{Extension, Json};
 use axum::response::IntoResponse;
+use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -358,12 +358,17 @@ impl ConnectorTransport for ReqwestConnectorTransport {
             rusty_agent_runtime::connector::HttpMethod::Put => "PUT",
             rusty_agent_runtime::connector::HttpMethod::Delete => "DELETE",
         };
-        let faulted = injected_faults().iter().any(|(m, p)| m == fault_method && request.url.contains(p.as_str()));
+        let faulted = injected_faults()
+            .iter()
+            .any(|(m, p)| m == fault_method && request.url.contains(p.as_str()));
         // A run in a world: the world answers what is addressed to the host
         // it stands in for, in-process, before egress ever sees it.
         if let Some(plane) = &self.worlds {
             let run = rusty_agent_runtime::tool::current_run();
-            let tenant = run.as_ref().and_then(|r| r.tenant().map(str::to_owned)).unwrap_or_else(|| crate::auth::DEFAULT_TENANT.to_owned());
+            let tenant = run
+                .as_ref()
+                .and_then(|r| r.tenant().map(str::to_owned))
+                .unwrap_or_else(|| crate::auth::DEFAULT_TENANT.to_owned());
             let execution = run.as_ref().and_then(|r| r.execution.as_ref());
             // The run's worlds: several when it touches several systems,
             // else the one; each answers what is addressed to the host it
@@ -371,10 +376,18 @@ impl ConnectorTransport for ReqwestConnectorTransport {
             let mut named: Vec<(String, String)> = execution
                 .and_then(|e| e.get("worlds"))
                 .and_then(serde_json::Value::as_array)
-                .map(|ws| ws.iter().filter_map(serde_json::Value::as_str).map(|w| (tenant.clone(), w.to_owned())).collect())
+                .map(|ws| {
+                    ws.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(|w| (tenant.clone(), w.to_owned()))
+                        .collect()
+                })
                 .unwrap_or_default();
             if named.is_empty() {
-                if let Some(one) = execution.and_then(|e| e.get("world")).and_then(serde_json::Value::as_str) {
+                if let Some(one) = execution
+                    .and_then(|e| e.get("world"))
+                    .and_then(serde_json::Value::as_str)
+                {
                     named.push((tenant.clone(), one.to_owned()));
                 } else if let Some(pinned) = self.pinned_world.clone() {
                     named.push(pinned);
@@ -472,10 +485,11 @@ impl ConnectorTransport for ReqwestConnectorTransport {
             // -----------------------------------------------------------------
             // Whether the request may have reached the system: a connection
             // that never opened sent nothing; anything after that may have.
-            let transport_err = |e: reqwest::Error| rusty_agent_runtime::error::RustyError::Transport {
-                sent: !(e.is_connect() || e.is_builder()),
-                detail: format!("connector transport: {e}"),
-            };
+            let transport_err =
+                |e: reqwest::Error| rusty_agent_runtime::error::RustyError::Transport {
+                    sent: !(e.is_connect() || e.is_builder()),
+                    detail: format!("connector transport: {e}"),
+                };
             let client = match pinned {
                 Some(addr) => reqwest::Client::builder()
                     .redirect(reqwest::redirect::Policy::none())
@@ -724,7 +738,11 @@ async fn serve_instance_full(
         .as_ref()
         .map(|cell| cell.tools_of(&instance.instance_id))
         .unwrap_or_default();
-    let assistants = state.server_store.list_assistants().await.unwrap_or_default();
+    let assistants = state
+        .server_store
+        .list_assistants()
+        .await
+        .unwrap_or_default();
     let agents: Vec<Value> = assistants
         .iter()
         .filter(|a| {
@@ -1007,7 +1025,10 @@ pub(crate) async fn from_openapi(
     }
     operations.push(ConnectorOperation {
         name: check.clone(),
-        description: format!("Verify the API answers at {} and the credentials are accepted.", candidate.path),
+        description: format!(
+            "Verify the API answers at {} and the credentials are accepted.",
+            candidate.path
+        ),
         method: HttpMethod::Get,
         path: candidate.path.clone(),
         effect: OperationEffect::ReadOnly,
@@ -1038,8 +1059,15 @@ pub(crate) async fn from_openapi(
     // any of it in the editor before registering.
     let proposals = manifest.propose_read_backs();
     for proposal in &proposals {
-        if let Some(op) = manifest.operations.iter_mut().find(|op| op.name == proposal.write) {
-            op.reconcile = serde_json::from_value(json!({"operation": proposal.operation, "arguments": proposal.arguments})).ok();
+        if let Some(op) = manifest
+            .operations
+            .iter_mut()
+            .find(|op| op.name == proposal.write)
+        {
+            op.reconcile = serde_json::from_value(
+                json!({"operation": proposal.operation, "arguments": proposal.arguments}),
+            )
+            .ok();
         }
     }
     let manifest = ConnectorManifest::new(
@@ -1054,7 +1082,11 @@ pub(crate) async fn from_openapi(
         manifest.check.clone(),
     )
     .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let still_guessing: Vec<String> = manifest.writes_without_read_back().iter().map(|op| op.name.clone()).collect();
+    let still_guessing: Vec<String> = manifest
+        .writes_without_read_back()
+        .iter()
+        .map(|op| op.name.clone())
+        .collect();
 
     Ok(Json(json!({
         "manifest": manifest,
@@ -1140,7 +1172,10 @@ pub(crate) async fn register_instance(
         .map_err(store_err)?;
     // The connection is a tool from now on.
     refresh_connection_tools(&state).await;
-    Ok((StatusCode::CREATED, Json(serve_instance_full(&state, &tenant, &instance, Some(&manifest)).await)))
+    Ok((
+        StatusCode::CREATED,
+        Json(serve_instance_full(&state, &tenant, &instance, Some(&manifest)).await),
+    ))
 }
 
 /// The rotate payload: a whole new config for an existing connection.
@@ -1168,7 +1203,9 @@ pub(crate) async fn rotate_instance(
         .get_instance(tenant.tenant(), &instance_id)
         .await
         .map_err(store_err)?
-        .ok_or_else(|| ApiError::not_found(format!("unknown connector instance `{instance_id}`")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
     let manifest = manifest_for(&state, &tenant, &existing.manifest_hash).await?;
     if let Err(rejection) = validate_config(&manifest.connection_specification, &payload.config) {
         return Err(ApiError::new(
@@ -1205,7 +1242,9 @@ pub(crate) async fn rotate_instance(
         .await
         .map_err(store_err)?;
     refresh_connection_tools(&state).await;
-    Ok(Json(serve_instance_full(&state, &tenant, &rotated, Some(&manifest)).await))
+    Ok(Json(
+        serve_instance_full(&state, &tenant, &rotated, Some(&manifest)).await,
+    ))
 }
 
 /// `DELETE /connectors/instances/{id}` — revoke.
@@ -1240,7 +1279,9 @@ pub(crate) async fn upgrade_instance(
         .get_instance(tenant.tenant(), &instance_id)
         .await
         .map_err(store_err)?
-        .ok_or_else(|| ApiError::not_found(format!("unknown connector instance `{instance_id}`")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
     let current = manifest_for(&state, &tenant, &existing.manifest_hash).await?;
     let target = manifest_for(&state, &tenant, &payload.manifest_hash).await?;
     if target.id != current.id {
@@ -1270,9 +1311,15 @@ pub(crate) async fn upgrade_instance(
     let candidate = rusty_agent_runtime::connector::render_template(&target.base_url, &config)
         .ok()
         .and_then(|url| host_of(&url));
-    let policy = Some(Arc::new(effective_egress_policy(state.as_ref(), candidate.as_deref())));
+    let policy = Some(Arc::new(effective_egress_policy(
+        state.as_ref(),
+        candidate.as_deref(),
+    )));
     let outcome = execute_check(&target, &config, &transport(policy)).await;
-    if !matches!(outcome.status, rusty_agent_runtime::connector::CheckStatus::Succeeded) {
+    if !matches!(
+        outcome.status,
+        rusty_agent_runtime::connector::CheckStatus::Succeeded
+    ) {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "check_failed",
@@ -1300,7 +1347,9 @@ pub(crate) async fn upgrade_instance(
         .map_err(store_err)?;
     refresh_connection_tools(&state).await;
     tracing::info!(%instance_id, from = %current.version, to = %target.version, connector = %target.id, "connection upgraded");
-    Ok(Json(serve_instance_full(&state, &tenant, &upgraded, Some(&target)).await))
+    Ok(Json(
+        serve_instance_full(&state, &tenant, &upgraded, Some(&target)).await,
+    ))
 }
 
 /// A connection follows its connector to another version outside the
@@ -1315,7 +1364,9 @@ pub(crate) async fn follow_version(
     existing: &ConnectorInstance,
     target: &ConnectorManifest,
 ) -> Result<ConnectorInstance, String> {
-    let config = opened_config(state, tenant, existing).await.map_err(|e| e.to_string())?;
+    let config = opened_config(state, tenant, existing)
+        .await
+        .map_err(|e| e.to_string())?;
     if let Err(rejection) = validate_config(&target.connection_specification, &config) {
         return Err(format!(
             "version {} of {} needs a different configuration ({rejection})",
@@ -1325,9 +1376,15 @@ pub(crate) async fn follow_version(
     let candidate = rusty_agent_runtime::connector::render_template(&target.base_url, &config)
         .ok()
         .and_then(|url| host_of(&url));
-    let policy = Some(Arc::new(effective_egress_policy(state, candidate.as_deref())));
+    let policy = Some(Arc::new(effective_egress_policy(
+        state,
+        candidate.as_deref(),
+    )));
     let outcome = execute_check(target, &config, &transport(policy)).await;
-    if !matches!(outcome.status, rusty_agent_runtime::connector::CheckStatus::Succeeded) {
+    if !matches!(
+        outcome.status,
+        rusty_agent_runtime::connector::CheckStatus::Succeeded
+    ) {
         return Err(format!(
             "{} did not answer version {}'s check: {}",
             target.display_name,
@@ -1363,7 +1420,9 @@ pub(crate) async fn revoke_instance(
         .await
         .map_err(store_err)?;
     if !removed {
-        return Err(ApiError::not_found(format!("unknown connector instance `{instance_id}`")));
+        return Err(ApiError::not_found(format!(
+            "unknown connector instance `{instance_id}`"
+        )));
     }
     refresh_connection_tools(&state).await;
     Ok(StatusCode::NO_CONTENT)
@@ -1483,7 +1542,13 @@ pub(crate) async fn check(
             // against a world, nothing reaches the wire, so the ceiling is
             // not in the way — it is said on the outcome, since the
             // connection's live calls will meet it.
-            if payload.world.as_deref().map(str::trim).filter(|w| !w.is_empty()).is_none() {
+            if payload
+                .world
+                .as_deref()
+                .map(str::trim)
+                .filter(|w| !w.is_empty())
+                .is_none()
+            {
                 under_ceiling(&state, &manifest, &config)?;
             }
             (manifest, config)
@@ -1502,24 +1567,41 @@ pub(crate) async fn check(
     let candidate = rusty_agent_runtime::connector::render_template(&manifest.base_url, &config)
         .ok()
         .and_then(|url| host_of(&url));
-    let policy = Some(Arc::new(effective_egress_policy(state.as_ref(), candidate.as_deref())));
+    let policy = Some(Arc::new(effective_egress_policy(
+        state.as_ref(),
+        candidate.as_deref(),
+    )));
     let mut wire = transport(policy);
     let mut in_world = None;
-    if let Some(named) = payload.world.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+    if let Some(named) = payload
+        .world
+        .as_deref()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+    {
         let world = state
             .worlds
             .find(tenant.tenant(), named)
             .await
             .map_err(ApiError::internal)?
-            .ok_or_else(|| ApiError::not_found(format!("unknown world `{named}` — make it in Evals → Worlds")))?;
-        if candidate.as_deref().is_some_and(|host| !host.eq_ignore_ascii_case(&world.stands_for)) {
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "unknown world `{named}` — make it in Evals → Worlds"
+                ))
+            })?;
+        if candidate
+            .as_deref()
+            .is_some_and(|host| !host.eq_ignore_ascii_case(&world.stands_for))
+        {
             return Err(ApiError::bad_request(format!(
                 "world `{named}` stands in for {}, and this configuration addresses {} — a check proves the host it will call",
                 world.stands_for,
                 candidate.as_deref().unwrap_or("?")
             )));
         }
-        wire = wire.with_worlds(Arc::clone(&state.worlds)).with_world(tenant.tenant(), world.world_id.clone());
+        wire = wire
+            .with_worlds(Arc::clone(&state.worlds))
+            .with_world(tenant.tenant(), world.world_id.clone());
         in_world = Some(world.name.clone());
     }
     let outcome = execute_check(&manifest, &config, &wire).await;
@@ -1527,7 +1609,12 @@ pub(crate) async fn check(
     if let Some(name) = in_world {
         served["world"] = json!(name);
         let ceiling = crate::egress_ceiling::current(&state);
-        if let Some(host) = crate::egress_ceiling::outside(&ceiling, connection_hosts(&manifest, &config).iter().map(String::as_str)) {
+        if let Some(host) = crate::egress_ceiling::outside(
+            &ceiling,
+            connection_hosts(&manifest, &config)
+                .iter()
+                .map(String::as_str),
+        ) {
             served["outside_ceiling"] = json!(host);
         }
     }
@@ -1679,7 +1766,10 @@ impl rusty_agent_runtime::connector::agent_tool::OAuthTokenSource for PasswordGr
                     "the token response carried no access_token".to_owned(),
                 )
             })?;
-        let expires_in = body.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(1800);
+        let expires_in = body
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1800);
         Ok((token.to_owned(), expires_in))
     }
 }
@@ -1723,7 +1813,9 @@ pub(crate) fn grant_status(instance: &ConnectorInstance, manifest: &ConnectorMan
         Some(expiry) if expiry <= Utc::now() && !refreshable => {
             json!({"kind": "expired", "expires_at": expiry})
         }
-        Some(expiry) => json!({"kind": "connected", "expires_at": expiry, "refreshable": refreshable}),
+        Some(expiry) => {
+            json!({"kind": "connected", "expires_at": expiry, "refreshable": refreshable})
+        }
         None => json!({"kind": "connected", "refreshable": refreshable}),
     }
 }
@@ -1767,7 +1859,9 @@ pub(crate) async fn authorize(
         .get_instance(tenant.tenant(), &instance_id)
         .await
         .map_err(store_err)?
-        .ok_or_else(|| ApiError::not_found(format!("unknown connector instance `{instance_id}`")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+        })?;
     let manifest = manifest_for(&state, &tenant, &instance.manifest_hash).await?;
     let authorization = manifest.authorization.as_ref().ok_or_else(|| {
         ApiError::bad_request(format!(
@@ -1779,8 +1873,9 @@ pub(crate) async fn authorize(
     // The client id is not a secret and lives in the config; the secret stays
     // sealed until the exchange, which is why only the id is rendered here.
     let config = opened_config(&state, &tenant, &instance).await?;
-    let client_id = rusty_agent_runtime::connector::render_template(&authorization.client_id, &config)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let client_id =
+        rusty_agent_runtime::connector::render_template(&authorization.client_id, &config)
+            .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let authorize_url =
         rusty_agent_runtime::connector::render_template(&authorization.authorize_url, &config)
             .map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -1887,7 +1982,8 @@ async fn complete_grant(
         .await
         .map_err(|e| e.to_string())?;
     let render = |template: &str| {
-        rusty_agent_runtime::connector::render_template(template, &config).map_err(|e| e.to_string())
+        rusty_agent_runtime::connector::render_template(template, &config)
+            .map_err(|e| e.to_string())
     };
     let token_url = render(&authorization.token_url)?;
     let client_id = render(&authorization.client_id)?;
@@ -1937,7 +2033,10 @@ fn read_token_response(body: &Value) -> Option<GrantTokens> {
     let token = body
         .get("access_token")
         .and_then(Value::as_str)
-        .or_else(|| body.pointer("/authed_user/access_token").and_then(Value::as_str))?;
+        .or_else(|| {
+            body.pointer("/authed_user/access_token")
+                .and_then(Value::as_str)
+        })?;
     let expires_at = body
         .get("expires_in")
         .and_then(Value::as_i64)
@@ -1976,10 +2075,11 @@ async fn seal_grant(
     }
     let mut config = instance.config.clone();
     if let Some(expiry) = tokens.expires_at {
-        if let Some(credentials) = config
-            .as_object_mut()
-            .and_then(|o| o.entry("credentials").or_insert_with(|| json!({})).as_object_mut())
-        {
+        if let Some(credentials) = config.as_object_mut().and_then(|o| {
+            o.entry("credentials")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+        }) {
             credentials.insert("expires_at".to_owned(), json!(expiry.to_rfc3339()));
         }
     }
@@ -2091,9 +2191,8 @@ async fn refreshed(
     let refresh_token = config
         .pointer("/credentials/refresh_token")
         .and_then(Value::as_str)?;
-    let render = |template: &str| {
-        rusty_agent_runtime::connector::render_template(template, &config).ok()
-    };
+    let render =
+        |template: &str| rusty_agent_runtime::connector::render_template(template, &config).ok();
     let response = reqwest::Client::new()
         .post(render(&authorization.token_url)?)
         .form(&[
@@ -2113,7 +2212,11 @@ async fn refreshed(
         tokens.refresh_token = Some(refresh_token.to_owned());
     }
     seal_grant(state, tenant, instance, tokens).await.ok()?;
-    state.connectors.get_instance(tenant, &instance.instance_id).await.ok()?
+    state
+        .connectors
+        .get_instance(tenant, &instance.instance_id)
+        .await
+        .ok()?
 }
 
 // --------------------------------------------------------------------- //
@@ -2176,7 +2279,11 @@ impl ConnectionTools {
 
     /// The tools a connection derives, by name (active bindings).
     pub fn tools_of(&self, instance_id: &str) -> Vec<String> {
-        self.history().into_iter().filter(|b| b.active() && b.instance_id == instance_id).map(|b| b.tool).collect()
+        self.history()
+            .into_iter()
+            .filter(|b| b.active() && b.instance_id == instance_id)
+            .map(|b| b.tool)
+            .collect()
     }
 
     /// The connection a tool runs through now, when it is a connection's.
@@ -2186,24 +2293,34 @@ impl ConnectionTools {
 
     /// The active binding of a tool.
     pub fn active_binding(&self, tool: &str) -> Option<Binding> {
-        self.history().into_iter().find(|b| b.active() && b.tool == tool)
+        self.history()
+            .into_iter()
+            .find(|b| b.active() && b.tool == tool)
     }
 
     /// The binding a tool ran through at `at`: the range covering it, else
     /// the latest one bound before it (a stub's refusal after a revoke maps
     /// to the connection that was revoked).
     pub fn binding_at(&self, tool: &str, at: DateTime<Utc>) -> Option<Binding> {
-        let mine: Vec<Binding> = self.history().into_iter().filter(|b| b.tool == tool).collect();
-        mine.iter()
-            .find(|b| b.covers(at))
-            .cloned()
-            .or_else(|| mine.into_iter().filter(|b| b.bound_at <= at).max_by_key(|b| b.bound_at))
+        let mine: Vec<Binding> = self
+            .history()
+            .into_iter()
+            .filter(|b| b.tool == tool)
+            .collect();
+        mine.iter().find(|b| b.covers(at)).cloned().or_else(|| {
+            mine.into_iter()
+                .filter(|b| b.bound_at <= at)
+                .max_by_key(|b| b.bound_at)
+        })
     }
 
     /// The binding of `tool` to `instance_id`, latest first — how an
     /// approval learns the connection it named was revoked while it waited.
     pub fn binding_of(&self, tool: &str, instance_id: &str) -> Option<Binding> {
-        self.history().into_iter().filter(|b| b.tool == tool && b.instance_id == instance_id).max_by_key(|b| b.bound_at)
+        self.history()
+            .into_iter()
+            .filter(|b| b.tool == tool && b.instance_id == instance_id)
+            .max_by_key(|b| b.bound_at)
     }
 
     /// Tools that have no active binding but had one: the revoked ones. A
@@ -2214,12 +2331,19 @@ impl ConnectionTools {
         let history = self.history();
         let mut out: Vec<Binding> = Vec::new();
         for b in history.iter().filter(|b| !b.active()) {
-            if history.iter().any(|a| a.active() && (a.tool == b.tool || a.instance_id == b.instance_id))
+            if history
+                .iter()
+                .any(|a| a.active() && (a.tool == b.tool || a.instance_id == b.instance_id))
                 || out.iter().any(|o| o.tool == b.tool)
             {
                 continue;
             }
-            let latest = history.iter().filter(|x| x.tool == b.tool && !x.active()).max_by_key(|x| x.bound_at).cloned().expect("at least this one");
+            let latest = history
+                .iter()
+                .filter(|x| x.tool == b.tool && !x.active())
+                .max_by_key(|x| x.bound_at)
+                .cloned()
+                .expect("at least this one");
             out.push(latest);
         }
         out
@@ -2228,7 +2352,13 @@ impl ConnectionTools {
     /// Record which connection a tool runs through now (tests).
     pub fn bind(&self, tool: &str, instance_id: &str) {
         if let Ok(mut b) = self.bindings.write() {
-            b.push(Binding { tool: tool.to_owned(), instance_id: instance_id.to_owned(), connection: instance_id.to_owned(), bound_at: Utc::now(), unbound_at: None });
+            b.push(Binding {
+                tool: tool.to_owned(),
+                instance_id: instance_id.to_owned(),
+                connection: instance_id.to_owned(),
+                bound_at: Utc::now(),
+                unbound_at: None,
+            });
         }
     }
 
@@ -2242,16 +2372,32 @@ impl ConnectionTools {
     /// Reconcile the history with what is bound now: a binding that is
     /// gone closes, a new one opens, one that stands is untouched. Returns
     /// the history to keep.
-    pub fn reconcile(&self, now_bound: &[(String, String, String)], at: DateTime<Utc>) -> Vec<Binding> {
+    pub fn reconcile(
+        &self,
+        now_bound: &[(String, String, String)],
+        at: DateTime<Utc>,
+    ) -> Vec<Binding> {
         let mut history = self.history();
         for b in history.iter_mut().filter(|b| b.active()) {
-            if !now_bound.iter().any(|(tool, id, _)| *tool == b.tool && *id == b.instance_id) {
+            if !now_bound
+                .iter()
+                .any(|(tool, id, _)| *tool == b.tool && *id == b.instance_id)
+            {
                 b.unbound_at = Some(at);
             }
         }
         for (tool, id, name) in now_bound {
-            if !history.iter().any(|b| b.active() && b.tool == *tool && b.instance_id == *id) {
-                history.push(Binding { tool: tool.clone(), instance_id: id.clone(), connection: name.clone(), bound_at: at, unbound_at: None });
+            if !history
+                .iter()
+                .any(|b| b.active() && b.tool == *tool && b.instance_id == *id)
+            {
+                history.push(Binding {
+                    tool: tool.clone(),
+                    instance_id: id.clone(),
+                    connection: name.clone(),
+                    bound_at: at,
+                    unbound_at: None,
+                });
             }
         }
         self.load(history.clone());
@@ -2292,7 +2438,9 @@ impl rusty_agent_runtime::tool::Tool for RevokedConnectionTool {
 impl std::fmt::Debug for ConnectionTools {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let count = self.tools.read().map(|tools| tools.len()).unwrap_or(0);
-        f.debug_struct("ConnectionTools").field("tools", &count).finish()
+        f.debug_struct("ConnectionTools")
+            .field("tools", &count)
+            .finish()
     }
 }
 
@@ -2304,7 +2452,11 @@ impl ConnectionTools {
 
 impl rusty_agent_runtime::tool::ToolSource for ConnectionTools {
     fn tools(&self) -> Vec<Arc<dyn rusty_agent_runtime::tool::Tool>> {
-        let mut tools = self.tools.read().map(|tools| tools.clone()).unwrap_or_default();
+        let mut tools = self
+            .tools
+            .read()
+            .map(|tools| tools.clone())
+            .unwrap_or_default();
         for binding in self.revoked() {
             let description = format!(
                 "Unavailable: the {} connection ({}) was revoked on {}. Nothing sent through it reaches the system; an admin reconnects it under Catalog → Connections.",
@@ -2312,7 +2464,10 @@ impl rusty_agent_runtime::tool::ToolSource for ConnectionTools {
                 binding.instance_id,
                 binding.unbound_at.map(|t| t.format("%Y-%m-%d").to_string()).unwrap_or_default()
             );
-            tools.push(Arc::new(RevokedConnectionTool { binding, description }));
+            tools.push(Arc::new(RevokedConnectionTool {
+                binding,
+                description,
+            }));
         }
         tools
     }
@@ -2337,7 +2492,11 @@ pub(crate) async fn restore_bindings(state: &AppState) {
 /// The connections a run's tool calls went through, from its journal and
 /// the binding history: `[{instance_id, name, revoked_at, tools: [{tool,
 /// calls}]}]`. A tool with no binding (the platform's own) is not listed.
-pub(crate) async fn run_connections(state: &AppState, tenant: &TenantContext, run_id: &str) -> Vec<Value> {
+pub(crate) async fn run_connections(
+    state: &AppState,
+    tenant: &TenantContext,
+    run_id: &str,
+) -> Vec<Value> {
     let Some(cell) = &state.connection_tools else {
         return Vec::new();
     };
@@ -2350,19 +2509,33 @@ pub(crate) async fn run_connections(state: &AppState, tenant: &TenantContext, ru
     let payload = |reference: &rusty_agent_runtime::record::PayloadRef| -> Option<Value> {
         match reference {
             rusty_agent_runtime::record::PayloadRef::Inline(value) => Some(value.clone()),
-            rusty_agent_runtime::record::PayloadRef::Artifact(artifact) => snapshot.artifacts.get(&artifact.sha256).cloned(),
+            rusty_agent_runtime::record::PayloadRef::Artifact(artifact) => {
+                snapshot.artifacts.get(&artifact.sha256).cloned()
+            }
         }
     };
     // (instance_id, name, revoked_at) → tool → calls, in first-seen order.
     let mut out: Vec<(Binding, Vec<(String, usize)>)> = Vec::new();
-    for event in snapshot.events.iter().filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ToolCall) {
-        let Some(tool) = event.input.as_ref().and_then(&payload).and_then(|v| v.get("tool").and_then(Value::as_str).map(str::to_owned)) else {
+    for event in snapshot
+        .events
+        .iter()
+        .filter(|e| e.kind == rusty_agent_runtime::record::RunEventKind::ToolCall)
+    {
+        let Some(tool) = event
+            .input
+            .as_ref()
+            .and_then(&payload)
+            .and_then(|v| v.get("tool").and_then(Value::as_str).map(str::to_owned))
+        else {
             continue;
         };
         let Some(binding) = cell.binding_at(&tool, event.recorded_at) else {
             continue;
         };
-        let entry = match out.iter_mut().find(|(b, _)| b.instance_id == binding.instance_id) {
+        let entry = match out
+            .iter_mut()
+            .find(|(b, _)| b.instance_id == binding.instance_id)
+        {
             Some(entry) => entry,
             None => {
                 out.push((binding.clone(), Vec::new()));
@@ -2377,7 +2550,10 @@ pub(crate) async fn run_connections(state: &AppState, tenant: &TenantContext, ru
     out.into_iter()
         .map(|(b, tools)| {
             let mut served = b.served();
-            served["tools"] = json!(tools.iter().map(|(t, n)| json!({"tool": t, "calls": n})).collect::<Vec<_>>());
+            served["tools"] = json!(tools
+                .iter()
+                .map(|(t, n)| json!({"tool": t, "calls": n}))
+                .collect::<Vec<_>>());
             served
         })
         .collect()
@@ -2460,7 +2636,8 @@ pub(crate) async fn refresh_connection_tools(state: &AppState) {
         // the instance's short id, never a character the catalog refuses —
         // one refused name empties the whole catalog.
         let shared = per_connector.get(&manifest.id).copied().unwrap_or(1) > 1;
-        let suffix = shared.then(|| instance.instance_id.trim_start_matches(INSTANCE_ID_PREFIX)[..8].to_owned());
+        let suffix = shared
+            .then(|| instance.instance_id.trim_start_matches(INSTANCE_ID_PREFIX)[..8].to_owned());
         for tool in rusty_agent_runtime::connector::ConnectorMethodTool::for_manifest(
             Arc::new(manifest.clone()),
             Arc::new(config),
@@ -2468,10 +2645,16 @@ pub(crate) async fn refresh_connection_tools(state: &AppState) {
         ) {
             let operation = tool_operation(&tool);
             let tool: Arc<dyn rusty_agent_runtime::tool::Tool> = match &suffix {
-                Some(short) => Arc::new(tool.renamed(format!("{}-{short}.{operation}", manifest.id))),
+                Some(short) => {
+                    Arc::new(tool.renamed(format!("{}-{short}.{operation}", manifest.id)))
+                }
                 None => Arc::new(tool),
             };
-            bindings.push((tool.name().to_owned(), instance.instance_id.clone(), manifest.display_name.clone()));
+            bindings.push((
+                tool.name().to_owned(),
+                instance.instance_id.clone(),
+                manifest.display_name.clone(),
+            ));
             tools.push(tool);
         }
     }
@@ -2485,14 +2668,22 @@ pub(crate) async fn refresh_connection_tools(state: &AppState) {
     if let Err(error) = state.server_store.put_bindings(&history).await {
         tracing::warn!(%error, "connection bindings: not kept");
     }
-    tracing::info!(count, bindings = history.len(), "connection tools refreshed");
+    tracing::info!(
+        count,
+        bindings = history.len(),
+        "connection tools refreshed"
+    );
     // A gap filed on one of these operations closes now.
     crate::routes::close_gaps_on_capabilities(state).await;
 }
 
 fn tool_operation(tool: &rusty_agent_runtime::connector::ConnectorMethodTool) -> String {
     use rusty_agent_runtime::tool::Tool as _;
-    tool.name().rsplit('.').next().unwrap_or_default().to_owned()
+    tool.name()
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 // --------------------------------------------------------------------- //
@@ -2545,15 +2736,19 @@ pub(crate) fn effective_egress_policy(
     state: &AppState,
     candidate: Option<&str>,
 ) -> rusty_agent_runtime::egress::EgressPolicy {
-    let mut policy = state
-        .egress
-        .read()
-        .map(|p| p.clone())
-        .unwrap_or(rusty_agent_runtime::egress::EgressPolicy { policies: Vec::new() });
+    let mut policy = state.egress.read().map(|p| p.clone()).unwrap_or(
+        rusty_agent_runtime::egress::EgressPolicy {
+            policies: Vec::new(),
+        },
+    );
     if let Some(host) = candidate {
         let host = host.to_ascii_lowercase();
-        if crate::egress_ceiling::current(state).fits(&host) && !policy.policies.iter().any(|p| p.endpoint.host == host) {
-            policy.policies.push(reach(&format!("candidate:{host}"), &host));
+        if crate::egress_ceiling::current(state).fits(&host)
+            && !policy.policies.iter().any(|p| p.endpoint.host == host)
+        {
+            policy
+                .policies
+                .push(reach(&format!("candidate:{host}"), &host));
         }
     }
     policy
@@ -2577,7 +2772,11 @@ pub(crate) fn connection_hosts(manifest: &ConnectorManifest, config: &Value) -> 
     }
     for op in &manifest.operations {
         for alt in &op.auth {
-            if let rusty_agent_runtime::connector::OperationAuth::OAuth2ClientCredentials { token_url, .. } = alt {
+            if let rusty_agent_runtime::connector::OperationAuth::OAuth2ClientCredentials {
+                token_url,
+                ..
+            } = alt
+            {
                 add(rusty_agent_runtime::connector::render_template(token_url, config).ok());
             }
         }
@@ -2587,7 +2786,11 @@ pub(crate) fn connection_hosts(manifest: &ConnectorManifest, config: &Value) -> 
 
 /// The refusal a connection outside the ceiling gets, at creation,
 /// rotation and upgrade alike: the host, and where it is allowed.
-pub(crate) fn under_ceiling(state: &AppState, manifest: &ConnectorManifest, config: &Value) -> Result<(), ApiError> {
+pub(crate) fn under_ceiling(
+    state: &AppState,
+    manifest: &ConnectorManifest,
+    config: &Value,
+) -> Result<(), ApiError> {
     let ceiling = crate::egress_ceiling::current(state);
     let hosts = connection_hosts(manifest, config);
     match crate::egress_ceiling::outside(&ceiling, hosts.iter().map(String::as_str)) {
@@ -2614,17 +2817,21 @@ pub(crate) async fn refresh_egress_policy(
     state: &AppState,
 ) -> rusty_agent_runtime::egress::EgressPolicy {
     let ceiling = crate::egress_ceiling::current(state);
-    let mut policy = if ceiling.open {
-        state
-            .config
-            .egress_policy
-            .clone()
-            .unwrap_or(rusty_agent_runtime::egress::EgressPolicy { policies: Vec::new() })
-    } else {
-        rusty_agent_runtime::egress::EgressPolicy {
-            policies: ceiling.concrete_hosts().map(|host| reach(&format!("ceiling:{host}"), host)).collect(),
-        }
-    };
+    let mut policy =
+        if ceiling.open {
+            state.config.egress_policy.clone().unwrap_or(
+                rusty_agent_runtime::egress::EgressPolicy {
+                    policies: Vec::new(),
+                },
+            )
+        } else {
+            rusty_agent_runtime::egress::EgressPolicy {
+                policies: ceiling
+                    .concrete_hosts()
+                    .map(|host| reach(&format!("ceiling:{host}"), host))
+                    .collect(),
+            }
+        };
     let tenant = crate::auth::DEFAULT_TENANT;
     let context = TenantContext::new(tenant.to_owned(), Vec::new());
     if let Ok(instances) = state.connectors.list_instances(tenant).await {
@@ -2645,9 +2852,10 @@ pub(crate) async fn refresh_egress_policy(
                     continue;
                 }
                 if !policy.policies.iter().any(|p| p.endpoint.host == host) {
-                    policy
-                        .policies
-                        .push(reach(&format!("connection:{}:{host}", instance.instance_id), &host));
+                    policy.policies.push(reach(
+                        &format!("connection:{}:{host}", instance.instance_id),
+                        &host,
+                    ));
                 }
             }
         }
@@ -2655,7 +2863,11 @@ pub(crate) async fn refresh_egress_policy(
     if let Ok(mut cell) = state.egress.write() {
         *cell = policy.clone();
     }
-    tracing::info!(hosts = policy.policies.len(), open = ceiling.open, "egress policy in force");
+    tracing::info!(
+        hosts = policy.policies.len(),
+        open = ceiling.open,
+        "egress policy in force"
+    );
     policy
 }
 
@@ -2667,23 +2879,54 @@ mod binding_tests {
         let cell = ConnectionTools::new();
         let t0 = chrono::Utc::now();
         // One connection, plain name.
-        cell.reconcile(&[("ticketing.create".into(), "inst-a".into(), "Ticketing".into())], t0);
+        cell.reconcile(
+            &[(
+                "ticketing.create".into(),
+                "inst-a".into(),
+                "Ticketing".into(),
+            )],
+            t0,
+        );
         // A second connection arrives: both are renamed by instance.
         cell.reconcile(
             &[
-                ("ticketing-aaaaaaaa.create".into(), "inst-a".into(), "Ticketing".into()),
-                ("ticketing-bbbbbbbb.create".into(), "inst-b".into(), "Ticketing 2".into()),
+                (
+                    "ticketing-aaaaaaaa.create".into(),
+                    "inst-a".into(),
+                    "Ticketing".into(),
+                ),
+                (
+                    "ticketing-bbbbbbbb.create".into(),
+                    "inst-b".into(),
+                    "Ticketing 2".into(),
+                ),
             ],
             t0,
         );
         let names: Vec<String> = cell.tools().iter().map(|t| t.name().to_owned()).collect();
-        assert!(!names.iter().any(|n| n == "ticketing.create"), "the old name is a rename, not a revoke: {names:?}");
+        assert!(
+            !names.iter().any(|n| n == "ticketing.create"),
+            "the old name is a rename, not a revoke: {names:?}"
+        );
         // The second connection goes: its tool is revoked; the first keeps
         // its plain name back, and the renamed one is not revoked either.
-        cell.reconcile(&[("ticketing.create".into(), "inst-a".into(), "Ticketing".into())], t0);
+        cell.reconcile(
+            &[(
+                "ticketing.create".into(),
+                "inst-a".into(),
+                "Ticketing".into(),
+            )],
+            t0,
+        );
         let names: Vec<String> = cell.tools().iter().map(|t| t.name().to_owned()).collect();
-        assert!(names.contains(&"ticketing-bbbbbbbb.create".to_owned()), "{names:?}");
-        assert!(!names.contains(&"ticketing-aaaaaaaa.create".to_owned()), "{names:?}");
+        assert!(
+            names.contains(&"ticketing-bbbbbbbb.create".to_owned()),
+            "{names:?}"
+        );
+        assert!(
+            !names.contains(&"ticketing-aaaaaaaa.create".to_owned()),
+            "{names:?}"
+        );
     }
 
     use super::ConnectionTools;
@@ -2694,8 +2937,14 @@ mod binding_tests {
         cell.bind("servicenow.list-records", "inst-a");
         cell.bind("servicenow.create-incident", "inst-a");
         cell.bind("slack.post-message", "inst-b");
-        assert_eq!(cell.tools_of("inst-a"), ["servicenow.list-records", "servicenow.create-incident"]);
-        assert_eq!(cell.instance_of("slack.post-message").as_deref(), Some("inst-b"));
+        assert_eq!(
+            cell.tools_of("inst-a"),
+            ["servicenow.list-records", "servicenow.create-incident"]
+        );
+        assert_eq!(
+            cell.instance_of("slack.post-message").as_deref(),
+            Some("inst-b")
+        );
         assert_eq!(cell.instance_of("echo"), None);
         assert!(cell.tools_of("inst-c").is_empty());
     }
@@ -2719,8 +2968,18 @@ pub(crate) async fn read_back_proposals(
         .filter(|w| !proposals.iter().any(|p| p.write == w.name))
         .map(|w| json!({"write": w.name, "why": format!("no read on {} takes a filter over one of `{}`'s fields — add one by hand, or extend the connector with a read that does", w.path, w.name)}))
         .collect();
-    let declared: Vec<Value> = manifest.operations.iter().filter_map(|op| op.reconcile.as_ref().map(|r| json!({"write": op.name, "operation": r.operation}))).collect();
-    Ok(Json(json!({"hash": manifest.hash, "id": manifest.id, "version": manifest.version, "proposals": proposals, "unproposable": unproposable, "declared": declared})))
+    let declared: Vec<Value> = manifest
+        .operations
+        .iter()
+        .filter_map(|op| {
+            op.reconcile
+                .as_ref()
+                .map(|r| json!({"write": op.name, "operation": r.operation}))
+        })
+        .collect();
+    Ok(Json(
+        json!({"hash": manifest.hash, "id": manifest.id, "version": manifest.version, "proposals": proposals, "unproposable": unproposable, "declared": declared}),
+    ))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2766,21 +3025,34 @@ pub(crate) async fn adopt_read_backs(
         return Err(ApiError::bad_request("name each write and its read-back, one to one: `writes` and `adopt` of the same length".to_owned()));
     }
     for (write, read_back) in payload.writes.iter().zip(payload.adopt.iter()) {
-        let read_exists = manifest.operations.iter().any(|op| op.name == read_back.operation && op.method == rusty_agent_runtime::connector::HttpMethod::Get);
+        let read_exists = manifest.operations.iter().any(|op| {
+            op.name == read_back.operation
+                && op.method == rusty_agent_runtime::connector::HttpMethod::Get
+        });
         if !read_exists {
             return Err(ApiError::bad_request(format!("`{}` is not a read of this connector; a read-back is one of its own GET operations", read_back.operation)));
         }
         let op = manifest
             .operations
             .iter_mut()
-            .find(|op| &op.name == write && op.method != rusty_agent_runtime::connector::HttpMethod::Get)
-            .ok_or_else(|| ApiError::bad_request(format!("`{write}` is not a write of this connector")))?;
+            .find(|op| {
+                &op.name == write && op.method != rusty_agent_runtime::connector::HttpMethod::Get
+            })
+            .ok_or_else(|| {
+                ApiError::bad_request(format!("`{write}` is not a write of this connector"))
+            })?;
         op.reconcile = Some(read_back.clone());
     }
     manifest.version = next_version(&manifest.version);
     manifest.hash = String::new();
-    let manifest = manifest.sealed().map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let registered = state.connectors.put_manifest(tenant.tenant(), &manifest).await.map_err(store_err)?;
+    let manifest = manifest
+        .sealed()
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let registered = state
+        .connectors
+        .put_manifest(tenant.tenant(), &manifest)
+        .await
+        .map_err(store_err)?;
     tracing::info!(connector = %manifest.id, version = %manifest.version, "read-backs adopted as a new version");
     let mut moved = None;
     if let Some(instance_id) = &payload.instance_id {
@@ -2789,18 +3061,42 @@ pub(crate) async fn adopt_read_backs(
             .get_instance(tenant.tenant(), instance_id)
             .await
             .map_err(store_err)?
-            .ok_or_else(|| ApiError::not_found(format!("unknown connector instance `{instance_id}`")))?;
+            .ok_or_else(|| {
+                ApiError::not_found(format!("unknown connector instance `{instance_id}`"))
+            })?;
         if existing.manifest_hash != hash {
-            return Err(ApiError::bad_request(format!("connection `{instance_id}` is not on version {} of {}; move it there first", hash, manifest.id)));
+            return Err(ApiError::bad_request(format!(
+                "connection `{instance_id}` is not on version {} of {}; move it there first",
+                hash, manifest.id
+            )));
         }
-        let upgraded = ConnectorInstance::new(instance_id, &manifest.hash, existing.config.clone(), existing.sealed.clone(), existing.created_at)
-            .map_err(|e| ApiError::bad_request(e.to_string()))?;
-        state.connectors.put_instance(tenant.tenant(), &upgraded).await.map_err(store_err)?;
+        let upgraded = ConnectorInstance::new(
+            instance_id,
+            &manifest.hash,
+            existing.config.clone(),
+            existing.sealed.clone(),
+            existing.created_at,
+        )
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        state
+            .connectors
+            .put_instance(tenant.tenant(), &upgraded)
+            .await
+            .map_err(store_err)?;
         refresh_connection_tools(&state).await;
         tracing::info!(%instance_id, to = %manifest.version, connector = %manifest.id, "connection moved to the version with read-backs");
         moved = Some(instance_id.clone());
     }
-    Ok((if registered { StatusCode::CREATED } else { StatusCode::OK }, Json(json!({"hash": manifest.hash, "id": manifest.id, "version": manifest.version, "registered": registered, "moved": moved}))))
+    Ok((
+        if registered {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(
+            json!({"hash": manifest.hash, "id": manifest.id, "version": manifest.version, "registered": registered, "moved": moved}),
+        ),
+    ))
 }
 
 #[cfg(test)]

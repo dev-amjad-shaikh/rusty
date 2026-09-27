@@ -51,7 +51,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, RustyError};
-use crate::record::{CURRENT_FORMAT_VERSION, CheckpointHeader, JournalRef};
+use crate::record::{CheckpointHeader, JournalRef, CURRENT_FORMAT_VERSION};
 use crate::state::State;
 
 /// A versioned snapshot of one thread's state at a super-step boundary.
@@ -1898,12 +1898,10 @@ mod tests {
 
         // No head or disabled policy: full snapshot.
         assert!(encode_delta(&next, None, &policy).checkpoint.base.is_none());
-        assert!(
-            encode_delta(&next, Some(&head), &DeltaPolicy::full_only())
-                .checkpoint
-                .base
-                .is_none()
-        );
+        assert!(encode_delta(&next, Some(&head), &DeltaPolicy::full_only())
+            .checkpoint
+            .base
+            .is_none());
 
         // A caller-set base is never honored: put contract is full snapshots.
         let mut with_base = next.clone();

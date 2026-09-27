@@ -13,9 +13,9 @@ use rusty_agent_runtime::gaps::{
     InteractionEvent, InteractionOutcome, ResolutionPath,
 };
 use rusty_agent_runtime::induction::{
-    ArtifactKind, ConfidenceGrade, CoverageConfig, DEFAULT_FAILING_THRESHOLD_MILLIS, IntentMap,
-    MatrixCell, MiningConfig, SupplyArtifact, crawl_coverage, declared_blocks, derive_intent_id,
-    diff_assignments, join_maps, mine_intents, seed_ledger, token_signature,
+    crawl_coverage, declared_blocks, derive_intent_id, diff_assignments, join_maps, mine_intents,
+    seed_ledger, token_signature, ArtifactKind, ConfidenceGrade, CoverageConfig, IntentMap,
+    MatrixCell, MiningConfig, SupplyArtifact, DEFAULT_FAILING_THRESHOLD_MILLIS,
 };
 use serde::Serialize;
 
@@ -507,12 +507,10 @@ fn seeding_files_the_learn_now_and_failing_cells_with_cited_evidence() {
         DEFAULT_FAILING_THRESHOLD_MILLIS,
         ts(BASE + 6 * DAY),
     );
-    assert!(
-        matrix
-            .rows
-            .iter()
-            .all(|row| row.cell == MatrixCell::LearnNow)
-    );
+    assert!(matrix
+        .rows
+        .iter()
+        .all(|row| row.cell == MatrixCell::LearnNow));
 
     let mut ledger = GapLedger::new();
     let seeded = seed_ledger(
@@ -532,12 +530,10 @@ fn seeding_files_the_learn_now_and_failing_cells_with_cited_evidence() {
             !entry.evidence.is_empty(),
             "seeded rows are cited by schema"
         );
-        assert!(
-            entry
-                .evidence
-                .iter()
-                .any(|citation| citation.kind == CitationKind::InteractionEvent)
-        );
+        assert!(entry
+            .evidence
+            .iter()
+            .any(|citation| citation.kind == CitationKind::InteractionEvent));
         assert_eq!(entry.status, GapStatus::Open);
         assert!(entry.observed);
     }

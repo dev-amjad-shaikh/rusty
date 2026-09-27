@@ -33,7 +33,7 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
-use rusty_agent_runtime::scope::{Scope, scope_authorizes};
+use rusty_agent_runtime::scope::{scope_authorizes, Scope};
 
 use crate::error::AdmissionReason;
 use crate::routes::AppState;
@@ -104,27 +104,64 @@ impl Role {
         let names: &[&str] = match self {
             Self::Admin => &["*:*", "*:*:*"],
             Self::Builder => &[
-                "assistants:read", "assistants:write",
-                "skills:*", "connectors:*", "connections:read", "connections:write", "connections:consent",
-                "threads:*", "runs:create", "runs:read", "runs:cancel", "runs:replay",
-                "crons:*", "triggers:read", "triggers:write", "triggers:delete", "approvals:*", "plugins:*",
+                "assistants:read",
+                "assistants:write",
+                "skills:*",
+                "connectors:*",
+                "connections:read",
+                "connections:write",
+                "connections:consent",
+                "threads:*",
+                "runs:create",
+                "runs:read",
+                "runs:cancel",
+                "runs:replay",
+                "crons:*",
+                "triggers:read",
+                "triggers:write",
+                "triggers:delete",
+                "approvals:*",
+                "plugins:*",
                 // The board: a builder queues work for the agent they are
                 // building and reads what became of it; claiming and
                 // settling stay the workers' and the operator's.
-                "tasks:read", "tasks:write",
-                "memory:*", "knowledge:read", "datasets:*", "gates:read", "mcp:read",
-                "receipts:verify", "health:read", "system:read", "registry:read",
+                "tasks:read",
+                "tasks:write",
+                "memory:*",
+                "knowledge:read",
+                "datasets:*",
+                "gates:read",
+                "mcp:read",
+                "receipts:verify",
+                "health:read",
+                "system:read",
+                "registry:read",
             ],
             Self::Operator => &[
-                "assistants:read", "assistants:activate",
-                "threads:*", "runs:*", "tasks:*", "crons:*", "triggers:read", "triggers:replay", "approvals:*", "plugins:*",
-                "connections:read", "connectors:read", "connectors:check",
+                "assistants:read",
+                "assistants:activate",
+                "threads:*",
+                "runs:*",
+                "tasks:*",
+                "crons:*",
+                "triggers:read",
+                "triggers:replay",
+                "approvals:*",
+                "plugins:*",
+                "connections:read",
+                "connectors:read",
+                "connectors:check",
                 // Worlds, datasets and their evaluations, read: an operator
                 // schedules an agent in a stand-in and reads how a suite
                 // went; making either stays the builder's.
                 "datasets:read",
-                "gates:*", "deployments:read", "deployments:promote",
-                "receipts:verify", "health:read", "system:read", "registry:read",
+                "gates:*",
+                "deployments:read",
+                "deployments:promote",
+                "receipts:verify",
+                "health:read",
+                "system:read",
+                "registry:read",
             ],
             Self::Auditor => &["*:read", "receipts:verify", "health:read", "system:read"],
         };
@@ -193,7 +230,11 @@ impl TenantContext {
     /// deployment's own hand, see [`server_principal`]. A request's context
     /// always sets its principal explicitly ([`require_api_key`]).
     pub(crate) fn new(tenant: String, scopes: Vec<Scope>) -> Self {
-        Self { tenant, scopes, principal: server_principal() }
+        Self {
+            tenant,
+            scopes,
+            principal: server_principal(),
+        }
     }
 
     pub(crate) fn with_principal(mut self, principal: Principal) -> Self {
@@ -389,7 +430,11 @@ pub(crate) async fn require_api_key(
                 .scope_table
                 .is_public(request.method().as_str(), request.uri().path()) =>
             {
-                (DEFAULT_TENANT.to_string(), Vec::new(), anonymous_principal())
+                (
+                    DEFAULT_TENANT.to_string(),
+                    Vec::new(),
+                    anonymous_principal(),
+                )
             }
             None => {
                 return AdmissionReason::Unauthorized.into_response(StatusCode::UNAUTHORIZED);
@@ -416,8 +461,13 @@ pub(crate) async fn require_api_key(
     // A renewed session tells the browser its new end; a header that does
     // not parse (never, for what session_cookie_header writes) is dropped.
     if let (Some(token), Some(until)) = (&session, renewed) {
-        if let Ok(value) = axum::http::HeaderValue::from_str(&crate::routes::session_cookie_header(token, Some(until))) {
-            response.headers_mut().append(axum::http::header::SET_COOKIE, value);
+        if let Ok(value) = axum::http::HeaderValue::from_str(&crate::routes::session_cookie_header(
+            token,
+            Some(until),
+        )) {
+            response
+                .headers_mut()
+                .append(axum::http::header::SET_COOKIE, value);
         }
     }
     response

@@ -10,7 +10,10 @@ use rusty_agent_server::ServerConfig;
 async fn production_without_auth_refuses_to_serve() {
     let mut config = ServerConfig::default().in_production(true);
     config.bind_addr = ([127, 0, 0, 1], 0).into();
-    assert!(!config.auth_enabled(), "the case under test is a keyless config");
+    assert!(
+        !config.auth_enabled(),
+        "the case under test is a keyless config"
+    );
 
     let err = rusty_agent_server::serve_with_shutdown(
         rusty_agent_server::GraphRegistry::new(),
@@ -29,7 +32,9 @@ async fn production_without_auth_refuses_to_serve() {
 
 #[tokio::test]
 async fn production_with_a_key_is_allowed_to_start() {
-    let mut config = ServerConfig::default().in_production(true).with_api_key("test-key");
+    let mut config = ServerConfig::default()
+        .in_production(true)
+        .with_api_key("test-key");
     config.bind_addr = ([127, 0, 0, 1], 0).into();
     assert!(config.auth_enabled());
 

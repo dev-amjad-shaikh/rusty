@@ -280,7 +280,16 @@ impl Installer {
         }
 
         let outcome = self
-            .install_inner(request, store, audit, blobs, registrar, eval, checker, approval_store)
+            .install_inner(
+                request,
+                store,
+                audit,
+                blobs,
+                registrar,
+                eval,
+                checker,
+                approval_store,
+            )
             .await;
 
         // Record outcome for idempotency — but NOT for PendingApproval,
@@ -355,7 +364,12 @@ impl Installer {
 
         // --- Step 2: Enforce allowlist ---
         match checker
-            .check_install(request, &manifest, version_meta.revoked.as_deref(), approval_store)
+            .check_install(
+                request,
+                &manifest,
+                version_meta.revoked.as_deref(),
+                approval_store,
+            )
             .await?
         {
             AllowlistCheckResult::Allowed => {}
@@ -684,7 +698,17 @@ impl Installer {
             actor: request.actor.clone(),
         };
         let install_outcome = self
-            .install(&install_req, scopes, store, audit, blobs, registrar, eval, checker, approval_store)
+            .install(
+                &install_req,
+                scopes,
+                store,
+                audit,
+                blobs,
+                registrar,
+                eval,
+                checker,
+                approval_store,
+            )
             .await?;
 
         let outcome = match install_outcome {
@@ -701,7 +725,11 @@ impl Installer {
                 package_id,
                 version,
             },
-            InstallOutcome::PendingApproval { package_id: _, version: _, obligation_id } => {
+            InstallOutcome::PendingApproval {
+                package_id: _,
+                version: _,
+                obligation_id,
+            } => {
                 return Err(catalog_err(format!(
                     "update pending approval: obligation {obligation_id}"
                 )));

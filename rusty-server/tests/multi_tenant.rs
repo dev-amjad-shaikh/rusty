@@ -8,12 +8,12 @@
 
 use std::path::PathBuf;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::prelude::*;
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 const ACME: (&str, &str) = ("x-api-key", "acme-secret");
@@ -390,20 +390,16 @@ async fn assistants_are_isolated_between_tenants() {
     }
 
     // On disk the records are separated per tenant.
-    assert!(
-        store
-            .join("assistants")
-            .join("acme")
-            .join("bot.json")
-            .exists()
-    );
-    assert!(
-        store
-            .join("assistants")
-            .join("globex")
-            .join("bot.json")
-            .exists()
-    );
+    assert!(store
+        .join("assistants")
+        .join("acme")
+        .join("bot.json")
+        .exists());
+    assert!(store
+        .join("assistants")
+        .join("globex")
+        .join("bot.json")
+        .exists());
     assert!(!store.join("assistants").join("bot.json").exists());
 
     let _ = std::fs::remove_dir_all(store);

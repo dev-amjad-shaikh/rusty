@@ -26,11 +26,11 @@ use serde_json::{json, Map, Value};
 
 use super::check::{render_operation_request, ConnectorTransport};
 use super::config::validate_config;
-use super::manifest::{ConnectorManifest, ConnectorOperation, HttpMethod};
 use super::conn_err;
-use crate::tool::ToolFailure;
+use super::manifest::{ConnectorManifest, ConnectorOperation, HttpMethod};
 use crate::error::Result;
 use crate::record::Effect;
+use crate::tool::ToolFailure;
 use crate::tool::{EffectClass, SandboxRequirement, Tool};
 
 /// Mints and refreshes an OAuth access token for a connector instance.
@@ -93,10 +93,31 @@ impl ConnectorMethodTool {
     /// what was found and say so; not found — one re-send is safe; the
     /// read-back itself failing leaves the outcome unknown as before.
     async fn reconcile_lost_answer(&self, args: &Value, detail: &str) -> Result<Value> {
-        let read_back = self.operation.reconcile.as_ref().expect("checked by the caller");
-        let unknown = || transport_failure(&self.tool_name, true, crate::error::RustyError::Transport { sent: true, detail: detail.to_owned() });
-        let reader = match Self::try_new(Arc::clone(&self.manifest), &read_back.operation, Arc::clone(&self.config), Arc::clone(&self.transport)) {
-            Ok(reader) => Self { oauth: self.oauth.clone(), ..reader },
+        let read_back = self
+            .operation
+            .reconcile
+            .as_ref()
+            .expect("checked by the caller");
+        let unknown = || {
+            transport_failure(
+                &self.tool_name,
+                true,
+                crate::error::RustyError::Transport {
+                    sent: true,
+                    detail: detail.to_owned(),
+                },
+            )
+        };
+        let reader = match Self::try_new(
+            Arc::clone(&self.manifest),
+            &read_back.operation,
+            Arc::clone(&self.config),
+            Arc::clone(&self.transport),
+        ) {
+            Ok(reader) => Self {
+                oauth: self.oauth.clone(),
+                ..reader
+            },
             Err(_) => return Err(unknown().into_error()),
         };
         let arguments = render_read_back(&read_back.arguments, args);
@@ -360,9 +381,7 @@ impl Tool for ConnectorMethodTool {
         if let Some(oauth) = &self.oauth {
             let token = oauth.token(&self.config).await?;
             if let Some(obj) = context.as_object_mut() {
-                let credentials = obj
-                    .entry("credentials")
-                    .or_insert_with(|| json!({}));
+                let credentials = obj.entry("credentials").or_insert_with(|| json!({}));
                 if let Some(creds) = credentials.as_object_mut() {
                     creds.insert("token".to_owned(), Value::String(token));
                 }
@@ -389,15 +408,21 @@ impl Tool for ConnectorMethodTool {
         let is_write = !matches!(self.operation.method, HttpMethod::Get);
         let response = match self.transport.send(request).await {
             Ok(response) => response,
-            Err(crate::error::RustyError::Transport { sent: true, detail }) if is_write && self.operation.reconcile.is_some() => {
+            Err(crate::error::RustyError::Transport { sent: true, detail })
+                if is_write && self.operation.reconcile.is_some() =>
+            {
                 return self.reconcile_lost_answer(&args, &detail).await;
             }
-            Err(error) => return Err(transport_failure(&self.tool_name, is_write, error).into_error()),
+            Err(error) => {
+                return Err(transport_failure(&self.tool_name, is_write, error).into_error())
+            }
         };
         let body = String::from_utf8_lossy(&response.body).to_string();
 
         if !(200..300).contains(&response.status) {
-            return Err(status_failure(&self.tool_name, response.status, &body, is_write).into_error());
+            return Err(
+                status_failure(&self.tool_name, response.status, &body, is_write).into_error(),
+            );
         }
 
         Ok(serde_json::from_str(&body).unwrap_or_else(|_| json!({ "body": body })))
@@ -409,7 +434,11 @@ impl Tool for ConnectorMethodTool {
 /// bare `message` or `error`), else the first 200 characters.
 fn said(body: &str) -> String {
     if let Ok(value) = serde_json::from_str::<Value>(body) {
-        let pick = |v: &Value| v.as_str().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+        let pick = |v: &Value| {
+            v.as_str()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+        };
         let nested = value.get("error").and_then(|e| {
             let message = e.get("message").and_then(pick);
             let detail = e.get("detail").and_then(pick);
@@ -420,7 +449,10 @@ fn said(body: &str) -> String {
                 _ => None,
             }
         });
-        if let Some(text) = nested.or_else(|| value.get("message").and_then(pick)).or_else(|| value.get("error").and_then(pick)) {
+        if let Some(text) = nested
+            .or_else(|| value.get("message").and_then(pick))
+            .or_else(|| value.get("error").and_then(pick))
+        {
             return text.chars().take(300).collect();
         }
     }
@@ -449,17 +481,75 @@ pub fn status_failure(tool: &str, status: u16, body: &str, is_write: bool) -> To
 /// The failure a wire error is: nothing sent is transient; a read whose
 /// answer was lost is safe to repeat; a write whose answer was lost may
 /// have happened and must be read back before it is sent again.
-pub fn transport_failure(tool: &str, is_write: bool, error: crate::error::RustyError) -> ToolFailure {
+pub fn transport_failure(
+    tool: &str,
+    is_write: bool,
+    error: crate::error::RustyError,
+) -> ToolFailure {
     match error {
-        crate::error::RustyError::Transport { sent: false, detail } => ToolFailure::new("transient", tool, detail, false, true, "nothing reached the system; call again once"),
-        crate::error::RustyError::Transport { sent: true, detail } if is_write => ToolFailure::new("unknown_outcome", tool, format!("the request was sent and the answer was lost: {detail}"), true, false, "do not send it again — read the record back first to learn whether it happened"),
-        crate::error::RustyError::Transport { sent: true, detail } => ToolFailure::new("transient", tool, format!("the answer was lost: {detail}"), true, true, "a read is safe to repeat; call again once"),
-        crate::error::RustyError::Tool(message) if message.contains("egress denied") || message.contains("egress ceiling") || message.contains("no endpoint policy") => ToolFailure::new("denied", tool, message, false, false, "do not retry; this deployment's policy does not allow reaching that host — say so"),
-        crate::error::RustyError::Tool(message) if message.contains("DNS") || message.contains("resolution") => ToolFailure::new("transient", tool, message, false, true, "the host did not resolve; nothing was sent — call again once, then say so"),
-        other => ToolFailure::new("unexpected", tool, other.to_string(), false, false, "say what happened"),
+        crate::error::RustyError::Transport {
+            sent: false,
+            detail,
+        } => ToolFailure::new(
+            "transient",
+            tool,
+            detail,
+            false,
+            true,
+            "nothing reached the system; call again once",
+        ),
+        crate::error::RustyError::Transport { sent: true, detail } if is_write => ToolFailure::new(
+            "unknown_outcome",
+            tool,
+            format!("the request was sent and the answer was lost: {detail}"),
+            true,
+            false,
+            "do not send it again — read the record back first to learn whether it happened",
+        ),
+        crate::error::RustyError::Transport { sent: true, detail } => ToolFailure::new(
+            "transient",
+            tool,
+            format!("the answer was lost: {detail}"),
+            true,
+            true,
+            "a read is safe to repeat; call again once",
+        ),
+        crate::error::RustyError::Tool(message)
+            if message.contains("egress denied")
+                || message.contains("egress ceiling")
+                || message.contains("no endpoint policy") =>
+        {
+            ToolFailure::new(
+                "denied",
+                tool,
+                message,
+                false,
+                false,
+                "do not retry; this deployment's policy does not allow reaching that host — say so",
+            )
+        }
+        crate::error::RustyError::Tool(message)
+            if message.contains("DNS") || message.contains("resolution") =>
+        {
+            ToolFailure::new(
+                "transient",
+                tool,
+                message,
+                false,
+                true,
+                "the host did not resolve; nothing was sent — call again once, then say so",
+            )
+        }
+        other => ToolFailure::new(
+            "unexpected",
+            tool,
+            other.to_string(),
+            false,
+            false,
+            "say what happened",
+        ),
     }
 }
-
 
 /// The read-back's arguments from its template: every string that is
 /// exactly `$name` becomes the write's argument `name` (whatever its type);
@@ -467,8 +557,14 @@ pub fn transport_failure(tool: &str, is_write: bool, error: crate::error::RustyE
 pub fn render_read_back(template: &Value, args: &Value) -> Value {
     match template {
         Value::String(s) => {
-            if let Some(name) = s.strip_prefix('$').filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_')) {
-                return args.get(name).cloned().unwrap_or(Value::String(String::new()));
+            if let Some(name) = s
+                .strip_prefix('$')
+                .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            {
+                return args
+                    .get(name)
+                    .cloned()
+                    .unwrap_or(Value::String(String::new()));
             }
             let mut out = s.clone();
             if let Some(map) = args.as_object() {
@@ -482,8 +578,14 @@ pub fn render_read_back(template: &Value, args: &Value) -> Value {
             }
             Value::String(out)
         }
-        Value::Array(items) => Value::Array(items.iter().map(|v| render_read_back(v, args)).collect()),
-        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (k.clone(), render_read_back(v, args))).collect()),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| render_read_back(v, args)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), render_read_back(v, args)))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -612,8 +714,12 @@ mod tests {
         // A shape invented by a caller rather than declared by the connector.
         let invented = Arc::new(json!({"credentials": {"oauth": {"client_id": "c"}}}));
         let refused = ConnectorMethodTool::try_new(
-            Arc::clone(&manifest), "list-records", invented, Arc::clone(&transport))
-            .expect_err("an undeclared shape must not configure a connector");
+            Arc::clone(&manifest),
+            "list-records",
+            invented,
+            Arc::clone(&transport),
+        )
+        .expect_err("an undeclared shape must not configure a connector");
         assert!(
             refused.to_string().contains("connection specification"),
             "the refusal must say what it failed against: {refused}"
@@ -621,7 +727,12 @@ mod tests {
 
         // The declared shape configures it.
         assert!(ConnectorMethodTool::try_new(
-            manifest, "list-records", Arc::new(json!({"instance": "dev00001"})), transport).is_ok());
+            manifest,
+            "list-records",
+            Arc::new(json!({"instance": "dev00001"})),
+            transport
+        )
+        .is_ok());
     }
 
     #[test]
@@ -633,15 +744,18 @@ mod tests {
 
         // The check is the setup gate, not an action an agent takes.
         let refused = ConnectorMethodTool::try_new(
-            Arc::clone(&manifest), "check-connection", Arc::clone(&config), Arc::clone(&transport))
-            .expect_err("the check is a gate");
+            Arc::clone(&manifest),
+            "check-connection",
+            Arc::clone(&config),
+            Arc::clone(&transport),
+        )
+        .expect_err("the check is a gate");
         assert!(refused.to_string().contains("gate"), "{refused}");
 
         // A write is a tool, carrying the effect the manifest declared — which
         // is what admission reads. Irreversible here, so the executor will
         // refuse it without an approval token; that refusal is the seam.
-        let write = ConnectorMethodTool::try_new(
-            manifest, "create-incident", config, transport)
+        let write = ConnectorMethodTool::try_new(manifest, "create-incident", config, transport)
             .expect("a write bridges");
         assert_eq!(write.name(), "servicenow.create-incident");
         assert_eq!(write.effect(), Effect::NonIdempotent);
@@ -652,8 +766,12 @@ mod tests {
         let manifest: ConnectorManifest = serde_json::from_value(manifest_json()).unwrap();
         let transport: Arc<dyn ConnectorTransport> = Arc::new(Recorder::default());
         let write = ConnectorMethodTool::try_new(
-            Arc::new(manifest), "create-incident", Arc::new(json!({"instance": "dev00001"})), transport)
-            .unwrap();
+            Arc::new(manifest),
+            "create-incident",
+            Arc::new(json!({"instance": "dev00001"})),
+            transport,
+        )
+        .unwrap();
         let body = write.body_json(&json!({"short_description": "Printer down", "urgency": "2"}));
         assert_eq!(
             serde_json::from_slice::<Value>(&body).unwrap(),
@@ -675,15 +793,22 @@ mod tests {
         let manifest: ConnectorManifest = serde_json::from_value(manifest_json()).unwrap();
         let transport: Arc<dyn ConnectorTransport> = Arc::new(Recorder::default());
         let read = ConnectorMethodTool::try_new(
-            Arc::new(manifest), "list-records", Arc::new(json!({"instance": "dev00001"})), transport)
-            .unwrap();
+            Arc::new(manifest),
+            "list-records",
+            Arc::new(json!({"instance": "dev00001"})),
+            transport,
+        )
+        .unwrap();
         let query = read.query_string(&serde_json::json!({
             "daily": ["temperature_2m_max", "precipitation_sum"],
             "forecast_days": 2,
             "nested": [{"no": 1}],
             "flags": [true, false]
         }));
-        assert_eq!(query, "daily=temperature_2m_max%2Cprecipitation_sum&flags=true%2Cfalse&forecast_days=2");
+        assert_eq!(
+            query,
+            "daily=temperature_2m_max%2Cprecipitation_sum&flags=true%2Cfalse&forecast_days=2"
+        );
     }
 
     #[tokio::test]
@@ -720,7 +845,10 @@ mod tests {
             .await
             .expect("the call succeeds");
         let url = recorder.seen.lock().unwrap()[0].clone();
-        assert!(url.starts_with("https://dev00001.service-now.com/"), "{url}");
+        assert!(
+            url.starts_with("https://dev00001.service-now.com/"),
+            "{url}"
+        );
     }
 
     /// A token source that counts how often it was asked, so the cache can be
@@ -742,9 +870,17 @@ mod tests {
 
     #[tokio::test]
     async fn an_oauth_instance_mints_a_token_and_reuses_it() {
-        let recorder = Arc::new(Recorder { status: 200, body: "{}".to_owned(), ..Default::default() });
-        let tokens = Arc::new(CountingTokens { expires_in: 1800, ..Default::default() });
-        let t = tool(Arc::clone(&recorder)).with_oauth(Arc::clone(&tokens) as Arc<dyn OAuthTokenSource>);
+        let recorder = Arc::new(Recorder {
+            status: 200,
+            body: "{}".to_owned(),
+            ..Default::default()
+        });
+        let tokens = Arc::new(CountingTokens {
+            expires_in: 1800,
+            ..Default::default()
+        });
+        let t = tool(Arc::clone(&recorder))
+            .with_oauth(Arc::clone(&tokens) as Arc<dyn OAuthTokenSource>);
 
         t.call(json!({"table": "incident"})).await.unwrap();
         t.call(json!({"table": "problem"})).await.unwrap();
@@ -755,10 +891,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_token_at_the_end_of_its_life_is_minted_again() {
-        let recorder = Arc::new(Recorder { status: 200, body: "{}".to_owned(), ..Default::default() });
+        let recorder = Arc::new(Recorder {
+            status: 200,
+            body: "{}".to_owned(),
+            ..Default::default()
+        });
         // Shorter than the early-refresh margin, so it is always due.
-        let tokens = Arc::new(CountingTokens { expires_in: 10, ..Default::default() });
-        let t = tool(Arc::clone(&recorder)).with_oauth(Arc::clone(&tokens) as Arc<dyn OAuthTokenSource>);
+        let tokens = Arc::new(CountingTokens {
+            expires_in: 10,
+            ..Default::default()
+        });
+        let t = tool(Arc::clone(&recorder))
+            .with_oauth(Arc::clone(&tokens) as Arc<dyn OAuthTokenSource>);
 
         t.call(json!({"table": "incident"})).await.unwrap();
         t.call(json!({"table": "incident"})).await.unwrap();
@@ -773,9 +917,16 @@ mod tests {
             ..Default::default()
         });
         let t = tool(recorder);
-        let err = t.call(json!({"table": "incident"})).await.unwrap_err().to_string();
+        let err = t
+            .call(json!({"table": "incident"}))
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("401"), "{err}");
-        assert!(!err.contains("abc123"), "the refusal must not quote the credential: {err}");
+        assert!(
+            !err.contains("abc123"),
+            "the refusal must not quote the credential: {err}"
+        );
     }
 
     /// A transport whose writes lose their answer after being sent, and
@@ -788,10 +939,19 @@ mod tests {
     #[async_trait]
     impl ConnectorTransport for LostWrite {
         async fn send(&self, request: CheckRequest) -> Result<CheckResponse> {
-            self.seen.lock().unwrap().push(format!("{:?} {}", request.method, request.url));
+            self.seen
+                .lock()
+                .unwrap()
+                .push(format!("{:?} {}", request.method, request.url));
             match request.method {
-                HttpMethod::Get => Ok(CheckResponse { status: 200, body: self.rows.clone().into_bytes() }),
-                _ => Err(crate::error::RustyError::Transport { sent: true, detail: "connection reset after the request was written".to_owned() }),
+                HttpMethod::Get => Ok(CheckResponse {
+                    status: 200,
+                    body: self.rows.clone().into_bytes(),
+                }),
+                _ => Err(crate::error::RustyError::Transport {
+                    sent: true,
+                    detail: "connection reset after the request was written".to_owned(),
+                }),
             }
         }
     }
@@ -812,22 +972,54 @@ mod tests {
     #[tokio::test]
     async fn a_write_whose_answer_was_lost_reads_itself_back_and_answers_with_what_it_found() {
         let transport = Arc::new(LostWrite { rows: r#"{"result": [{"number": "INC0010777", "short_description": "printer on 3 jams"}]}"#.to_owned(), seen: Default::default() });
-        let tool = ConnectorMethodTool::new(manifest_with_read_back(), "create-incident", Arc::new(json!({"instance": "dev1"})), transport.clone()).unwrap();
-        let answer = tool.call(json!({"short_description": "printer on 3 jams"})).await.expect("reconciled, not failed");
+        let tool = ConnectorMethodTool::new(
+            manifest_with_read_back(),
+            "create-incident",
+            Arc::new(json!({"instance": "dev1"})),
+            transport.clone(),
+        )
+        .unwrap();
+        let answer = tool
+            .call(json!({"short_description": "printer on 3 jams"}))
+            .await
+            .expect("reconciled, not failed");
         assert_eq!(answer["reconciled"], json!(true));
-        assert_eq!(answer["found"]["result"][0]["number"], json!("INC0010777"), "{answer}");
-        assert_eq!(answer["read_back"]["tool"], json!("servicenow.list-records"));
-        assert_eq!(answer["read_back"]["arguments"]["sysparm_query"], json!("short_description=printer on 3 jams"));
+        assert_eq!(
+            answer["found"]["result"][0]["number"],
+            json!("INC0010777"),
+            "{answer}"
+        );
+        assert_eq!(
+            answer["read_back"]["tool"],
+            json!("servicenow.list-records")
+        );
+        assert_eq!(
+            answer["read_back"]["arguments"]["sysparm_query"],
+            json!("short_description=printer on 3 jams")
+        );
         let seen = transport.seen.lock().unwrap().clone();
         assert_eq!(seen.len(), 2, "the write, then the read-back: {seen:?}");
         assert!(seen[1].contains("/api/now/table/incident"), "{seen:?}");
     }
 
     #[tokio::test]
-    async fn a_write_whose_answer_was_lost_and_whose_read_back_found_nothing_may_be_sent_once_more() {
-        let transport = Arc::new(LostWrite { rows: r#"{"result": []}"#.to_owned(), seen: Default::default() });
-        let tool = ConnectorMethodTool::new(manifest_with_read_back(), "create-incident", Arc::new(json!({"instance": "dev1"})), transport).unwrap();
-        let error = tool.call(json!({"short_description": "printer on 3 jams"})).await.expect_err("unknown, but safe to retry");
+    async fn a_write_whose_answer_was_lost_and_whose_read_back_found_nothing_may_be_sent_once_more()
+    {
+        let transport = Arc::new(LostWrite {
+            rows: r#"{"result": []}"#.to_owned(),
+            seen: Default::default(),
+        });
+        let tool = ConnectorMethodTool::new(
+            manifest_with_read_back(),
+            "create-incident",
+            Arc::new(json!({"instance": "dev1"})),
+            transport,
+        )
+        .unwrap();
+        let error = tool
+            .call(json!({"short_description": "printer on 3 jams"}))
+            .await
+            .expect_err("unknown, but safe to retry");
         let failure = ToolFailure::parse(&error.to_string()).expect("a structured failure");
         assert_eq!(failure.class, "unknown_outcome");
         assert!(failure.retry_safe, "{failure:?}");
@@ -837,13 +1029,22 @@ mod tests {
     #[test]
     fn read_back_templates_take_the_writes_arguments() {
         let args = json!({"short_description": "a & b", "urgency": 2});
-        let rendered = render_read_back(&json!({"q": "short_description=$short_description", "u": "$urgency", "n": 3, "list": ["$urgency"]}), &args);
-        assert_eq!(rendered, json!({"q": "short_description=a & b", "u": 2, "n": 3, "list": [2]}));
+        let rendered = render_read_back(
+            &json!({"q": "short_description=$short_description", "u": "$urgency", "n": 3, "list": ["$urgency"]}),
+            &args,
+        );
+        assert_eq!(
+            rendered,
+            json!({"q": "short_description=a & b", "u": 2, "n": 3, "list": [2]})
+        );
         assert!(looks_empty(&json!({"result": []})));
         assert!(!looks_empty(&json!({"result": [{"number": "INC1"}]})));
-        assert!(looks_empty(&json!([])) && looks_empty(&json!({})) && !looks_empty(&json!({"number": "INC1"})));
+        assert!(
+            looks_empty(&json!([]))
+                && looks_empty(&json!({}))
+                && !looks_empty(&json!({"number": "INC1"}))
+        );
     }
-
 }
 
 #[cfg(test)]
@@ -853,39 +1054,93 @@ mod failure_tests {
 
     #[test]
     fn a_status_is_a_failure_the_loop_can_act_on() {
-        let f = status_failure("servicenow.list-records", 400, r#"{"error":{"message":"Invalid table incdent","detail":"Table incdent does not exist"},"status":"failure"}"#, false);
+        let f = status_failure(
+            "servicenow.list-records",
+            400,
+            r#"{"error":{"message":"Invalid table incdent","detail":"Table incdent does not exist"},"status":"failure"}"#,
+            false,
+        );
         assert_eq!(f.class, "invalid_arguments");
-        assert!(f.detail.contains("Invalid table incdent") && f.detail.contains("does not exist"), "{}", f.detail);
+        assert!(
+            f.detail.contains("Invalid table incdent") && f.detail.contains("does not exist"),
+            "{}",
+            f.detail
+        );
         assert!(!f.retry_safe);
         assert!(f.next.contains("fix the arguments"));
         let denied = status_failure("t", 401, "Bearer abc123 was rejected", false);
         assert_eq!(denied.class, "denied");
-        assert!(!denied.detail.contains("abc123"), "the body never travels on an auth refusal");
-        assert_eq!(status_failure("t", 404, r#"{"message":"no such record"}"#, false).class, "not_found");
+        assert!(
+            !denied.detail.contains("abc123"),
+            "the body never travels on an auth refusal"
+        );
+        assert_eq!(
+            status_failure("t", 404, r#"{"message":"no such record"}"#, false).class,
+            "not_found"
+        );
         assert_eq!(status_failure("t", 429, "", false).class, "rate_limited");
         let read = status_failure("t", 503, "down", false);
         assert_eq!(read.class, "dependency");
-        assert!(read.retry_safe, "a read may be repeated after the system's own failure");
+        assert!(
+            read.retry_safe,
+            "a read may be repeated after the system's own failure"
+        );
         let write = status_failure("t", 503, "down", true);
         assert_eq!(write.class, "dependency");
-        assert!(!write.retry_safe && write.next.contains("read the record back"), "{}", write.next);
-        assert_eq!(status_failure("t", 409, r#"{"error":"exists"}"#, true).class, "conflict");
+        assert!(
+            !write.retry_safe && write.next.contains("read the record back"),
+            "{}",
+            write.next
+        );
+        assert_eq!(
+            status_failure("t", 409, r#"{"error":"exists"}"#, true).class,
+            "conflict"
+        );
     }
 
     #[test]
     fn a_wire_failure_says_whether_anything_may_have_happened() {
-        let nothing = transport_failure("t", true, RustyError::Transport { sent: false, detail: "connection refused".into() });
+        let nothing = transport_failure(
+            "t",
+            true,
+            RustyError::Transport {
+                sent: false,
+                detail: "connection refused".into(),
+            },
+        );
         assert_eq!(nothing.class, "transient");
         assert!(nothing.retry_safe && !nothing.sent);
-        let lost_read = transport_failure("t", false, RustyError::Transport { sent: true, detail: "timed out".into() });
+        let lost_read = transport_failure(
+            "t",
+            false,
+            RustyError::Transport {
+                sent: true,
+                detail: "timed out".into(),
+            },
+        );
         assert_eq!(lost_read.class, "transient");
         assert!(lost_read.retry_safe && lost_read.sent);
-        let lost_write = transport_failure("t", true, RustyError::Transport { sent: true, detail: "timed out".into() });
+        let lost_write = transport_failure(
+            "t",
+            true,
+            RustyError::Transport {
+                sent: true,
+                detail: "timed out".into(),
+            },
+        );
         assert_eq!(lost_write.class, "unknown_outcome");
         assert!(!lost_write.retry_safe && lost_write.next.contains("read the record back"));
-        let ceiling = transport_failure("t", false, RustyError::Tool("egress denied: no endpoint policy for x".into()));
+        let ceiling = transport_failure(
+            "t",
+            false,
+            RustyError::Tool("egress denied: no endpoint policy for x".into()),
+        );
         assert_eq!(ceiling.class, "denied");
-        let dns = transport_failure("t", false, RustyError::Tool("egress: DNS resolution failed for x".into()));
+        let dns = transport_failure(
+            "t",
+            false,
+            RustyError::Tool("egress: DNS resolution failed for x".into()),
+        );
         assert_eq!(dns.class, "transient");
         // The failure round-trips through the tool error channel.
         let err = lost_write.clone().into_error().to_string();
@@ -893,4 +1148,3 @@ mod failure_tests {
         assert_eq!(parsed, lost_write);
     }
 }
-

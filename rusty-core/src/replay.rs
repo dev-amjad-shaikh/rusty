@@ -694,7 +694,6 @@ impl ChatModel for RecordingChatModel {
         self.inner.effect()
     }
 
-
     fn pricing(&self) -> Option<crate::llm::ModelPricing> {
         self.inner.pricing()
     }
@@ -785,7 +784,6 @@ impl ChatModel for ReplayingChatModel {
     fn effect(&self) -> Effect {
         self.inner.effect()
     }
-
 
     /// Identity only: replay re-journals the *recorded* `cost_usd` and never
     /// recomputes it, so this is consulted only when something inspects the
@@ -1134,7 +1132,9 @@ impl ExactReplay {
             // A policy with a memory section read memory through the
             // journaled seam; the replay serves those reads from the log.
             if let Some(policy) = declaration.context_policy {
-                let reads_memory = policy.get("memory").is_some_and(|section| !section.is_null());
+                let reads_memory = policy
+                    .get("memory")
+                    .is_some_and(|section| !section.is_null());
                 config.context_policy = Some(policy);
                 if reads_memory {
                     config.memory_source = Some(crate::memory::MemorySource::Replay(

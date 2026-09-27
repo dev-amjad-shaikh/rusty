@@ -48,9 +48,13 @@ use crate::error::ApiError;
 use crate::routes::AppState;
 use rusty_agent_runtime::broker::SealedCredential;
 use rusty_agent_runtime::error::Result as CoreResult;
-use rusty_agent_runtime::mcp::{InitializeResult, McpClient, McpStdioClient, McpToolAdapter, McpToolInfo};
+use rusty_agent_runtime::mcp::{
+    InitializeResult, McpClient, McpStdioClient, McpToolAdapter, McpToolInfo,
+};
 use rusty_agent_runtime::record::Effect;
-use rusty_agent_runtime::tool::{Tool, ToolSource, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES};
+use rusty_agent_runtime::tool::{
+    Tool, ToolSource, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_SCHEMA_BYTES,
+};
 
 const ID_PREFIX: &str = "mcp-";
 const MAX_SERVER_NAME_LEN: usize = 32;
@@ -112,10 +116,22 @@ pub(crate) struct MountStatus {
 
 impl MountStatus {
     fn not_mounted(reason: Option<String>) -> Self {
-        Self { state: "not_mounted", server: None, tools: Vec::new(), left_out: Vec::new(), error: reason }
+        Self {
+            state: "not_mounted",
+            server: None,
+            tools: Vec::new(),
+            left_out: Vec::new(),
+            error: reason,
+        }
     }
     fn failed(error: String) -> Self {
-        Self { state: "failed", server: None, tools: Vec::new(), left_out: Vec::new(), error: Some(error) }
+        Self {
+            state: "failed",
+            server: None,
+            tools: Vec::new(),
+            left_out: Vec::new(),
+            error: Some(error),
+        }
     }
 }
 
@@ -154,13 +170,20 @@ impl McpTools {
     }
 
     fn take(&self, id: &str) -> Option<McpClient> {
-        let taken = self.mounts.write().ok().and_then(|mut mounts| mounts.remove(id));
+        let taken = self
+            .mounts
+            .write()
+            .ok()
+            .and_then(|mut mounts| mounts.remove(id));
         self.rebuild();
         taken.and_then(|mount| mount.client)
     }
 
     fn status(&self, id: &str) -> Option<MountStatus> {
-        self.mounts.read().ok().and_then(|mounts| mounts.get(id).map(|m| m.status.clone()))
+        self.mounts
+            .read()
+            .ok()
+            .and_then(|mounts| mounts.get(id).map(|m| m.status.clone()))
     }
 
     /// Every mounted server's tools, in one list, server by server.
@@ -171,7 +194,9 @@ impl McpTools {
             .map(|mounts| {
                 let mut ids: Vec<&String> = mounts.keys().collect();
                 ids.sort();
-                ids.into_iter().flat_map(|id| mounts[id].tools.iter().cloned()).collect()
+                ids.into_iter()
+                    .flat_map(|id| mounts[id].tools.iter().cloned())
+                    .collect()
             })
             .unwrap_or_default();
         if let Ok(mut tools) = self.tools.write() {
@@ -182,7 +207,10 @@ impl McpTools {
 
 impl ToolSource for McpTools {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        self.tools.read().map(|tools| tools.clone()).unwrap_or_default()
+        self.tools
+            .read()
+            .map(|tools| tools.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -260,14 +288,21 @@ pub(crate) fn name_problem(name: &str) -> Option<String> {
         return Some("a server needs a name".to_owned());
     }
     if name.len() > MAX_SERVER_NAME_LEN {
-        return Some(format!("a server name is at most {MAX_SERVER_NAME_LEN} characters"));
+        return Some(format!(
+            "a server name is at most {MAX_SERVER_NAME_LEN} characters"
+        ));
     }
-    let kebab = name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    let kebab = name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !name.starts_with('-')
         && !name.ends_with('-')
         && !name.contains("--");
     if !kebab {
-        return Some("a server name is kebab-case — it prefixes every tool name (`files.read_file`)".to_owned());
+        return Some(
+            "a server name is kebab-case — it prefixes every tool name (`files.read_file`)"
+                .to_owned(),
+        );
     }
     None
 }
@@ -287,12 +322,21 @@ async fn connect(
 
 /// The environment the process is spawned with: plain values plus the
 /// sealed ones, opened for this spawn only.
-async fn opened_env(state: &AppState, tenant: &str, record: &McpServerRecord) -> Result<Vec<(String, String)>, String> {
-    let mut env: Vec<(String, String)> = record.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+async fn opened_env(
+    state: &AppState,
+    tenant: &str,
+    record: &McpServerRecord,
+) -> Result<Vec<(String, String)>, String> {
+    let mut env: Vec<(String, String)> = record
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     let owner = scope_id(tenant, &record.id);
     for (key, envelope) in &record.sealed_env {
         let bytes = state.broker.open_connector_secret(&owner, envelope).await?;
-        let value = String::from_utf8(bytes).map_err(|_| format!("sealed value for `{key}` is not UTF-8"))?;
+        let value = String::from_utf8(bytes)
+            .map_err(|_| format!("sealed value for `{key}` is not UTF-8"))?;
         env.push((key.clone(), value));
     }
     Ok(env)
@@ -301,16 +345,27 @@ async fn opened_env(state: &AppState, tenant: &str, record: &McpServerRecord) ->
 /// Mount one server into the live cell; the status says what happened.
 async fn mount(state: &AppState, tenant: &str, record: &McpServerRecord) -> MountStatus {
     let Some(cell) = &state.mcp_tools else {
-        return MountStatus::not_mounted(Some("this server hosts no graph that reads MCP tools".to_owned()));
+        return MountStatus::not_mounted(Some(
+            "this server hosts no graph that reads MCP tools".to_owned(),
+        ));
     };
     if tenant != DEFAULT_TENANT {
-        return MountStatus::not_mounted(Some("only the default tenant's servers are mounted".to_owned()));
+        return MountStatus::not_mounted(Some(
+            "only the default tenant's servers are mounted".to_owned(),
+        ));
     }
     let env = match opened_env(state, tenant, record).await {
         Ok(env) => env,
         Err(error) => {
             let status = MountStatus::failed(format!("secrets could not be opened: {error}"));
-            cell.set(&record.id, Mount { client: None, tools: Vec::new(), status: status.clone() });
+            cell.set(
+                &record.id,
+                Mount {
+                    client: None,
+                    tools: Vec::new(),
+                    status: status.clone(),
+                },
+            );
             return status;
         }
     };
@@ -318,7 +373,14 @@ async fn mount(state: &AppState, tenant: &str, record: &McpServerRecord) -> Moun
         Ok(ok) => ok,
         Err(error) => {
             let status = MountStatus::failed(error.to_string());
-            cell.set(&record.id, Mount { client: None, tools: Vec::new(), status: status.clone() });
+            cell.set(
+                &record.id,
+                Mount {
+                    client: None,
+                    tools: Vec::new(),
+                    status: status.clone(),
+                },
+            );
             return status;
         }
     };
@@ -327,19 +389,38 @@ async fn mount(state: &AppState, tenant: &str, record: &McpServerRecord) -> Moun
     let mut left_out = Vec::new();
     for info in infos {
         let schema_ok = info.input_schema.is_object()
-            && serde_json::to_vec(&info.input_schema).map(|b| b.len() <= MAX_TOOL_SCHEMA_BYTES).unwrap_or(false);
+            && serde_json::to_vec(&info.input_schema)
+                .map(|b| b.len() <= MAX_TOOL_SCHEMA_BYTES)
+                .unwrap_or(false);
         let name_ok = !info.name.is_empty()
             && info.name.len() + record.name.len() < 128
-            && info.name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b));
+            && info
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b));
         if !schema_ok || !name_ok {
             left_out.push(info.name.clone());
             continue;
         }
         let name = format!("{}.{}", record.name, info.name);
-        let effect = record.tool_effects.get(&info.name).copied().unwrap_or(Effect::NonIdempotent);
+        let effect = record
+            .tool_effects
+            .get(&info.name)
+            .copied()
+            .unwrap_or(Effect::NonIdempotent);
         let description = contract_description(&record.name, &info.name, &info.description);
-        mounted.push(MountedTool { name: name.clone(), tool: info.name.clone(), description: description.clone(), effect });
-        tools.push(Arc::new(DeclaredTool { name, description, effect, inner: McpToolAdapter::new(client.clone(), info) }));
+        mounted.push(MountedTool {
+            name: name.clone(),
+            tool: info.name.clone(),
+            description: description.clone(),
+            effect,
+        });
+        tools.push(Arc::new(DeclaredTool {
+            name,
+            description,
+            effect,
+            inner: McpToolAdapter::new(client.clone(), info),
+        }));
     }
     let status = MountStatus {
         state: "mounted",
@@ -348,7 +429,14 @@ async fn mount(state: &AppState, tenant: &str, record: &McpServerRecord) -> Moun
         left_out,
         error: None,
     };
-    cell.set(&record.id, Mount { client: Some(client), tools, status: status.clone() });
+    cell.set(
+        &record.id,
+        Mount {
+            client: Some(client),
+            tools,
+            status: status.clone(),
+        },
+    );
     status
 }
 
@@ -388,7 +476,12 @@ fn serve(state: &AppState, record: &McpServerRecord, status: MountStatus) -> Val
         .iter()
         .map(|(name, value)| json!({ "name": name, "value": value, "secret": false }))
         .collect();
-    env.extend(record.sealed_env.keys().map(|name| json!({ "name": name, "secret": true })));
+    env.extend(
+        record
+            .sealed_env
+            .keys()
+            .map(|name| json!({ "name": name, "secret": true })),
+    );
     json!({
         "id": record.id,
         "name": record.name,
@@ -474,12 +567,21 @@ pub(crate) struct ProbePayload {
 
 fn check_launch(command: &str, env: &[EnvEntry]) -> Result<(), ApiError> {
     if command.trim().is_empty() {
-        return Err(ApiError::bad_request("a server needs a command to run".to_owned()));
+        return Err(ApiError::bad_request(
+            "a server needs a command to run".to_owned(),
+        ));
     }
     for entry in env {
-        let ok = !entry.name.is_empty() && entry.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        let ok = !entry.name.is_empty()
+            && entry
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if !ok {
-            return Err(ApiError::bad_request(format!("`{}` is not an environment variable name", entry.name)));
+            return Err(ApiError::bad_request(format!(
+                "`{}` is not an environment variable name",
+                entry.name
+            )));
         }
     }
     Ok(())
@@ -495,7 +597,11 @@ pub(crate) async fn probe(
         return Err(disabled());
     }
     check_launch(&payload.command, &payload.env)?;
-    let env: Vec<(String, String)> = payload.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect();
+    let env: Vec<(String, String)> = payload
+        .env
+        .iter()
+        .map(|e| (e.name.clone(), e.value.clone()))
+        .collect();
     let (client, init, tools) = connect(payload.command.trim(), &payload.args, &env)
         .await
         .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "mcp_failed", e.to_string()))?;
@@ -545,8 +651,13 @@ pub(crate) async fn create_server(
         return Err(ApiError::bad_request(problem));
     }
     check_launch(&payload.command, &payload.env)?;
-    if records(&state, tenant.tenant()).iter().any(|r| r.name == name) {
-        return Err(ApiError::conflict(format!("an MCP server named `{name}` is already registered")));
+    if records(&state, tenant.tenant())
+        .iter()
+        .any(|r| r.name == name)
+    {
+        return Err(ApiError::conflict(format!(
+            "an MCP server named `{name}` is already registered"
+        )));
     }
     let taken_by_connector = load_manifests(&state.config.store_path)
         .into_iter()
@@ -558,7 +669,10 @@ pub(crate) async fn create_server(
         )));
     }
 
-    let id = format!("{ID_PREFIX}{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
+    let id = format!(
+        "{ID_PREFIX}{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..16]
+    );
     let owner = scope_id(tenant.tenant(), &id);
     let mut env = BTreeMap::new();
     let mut sealed_env = BTreeMap::new();
@@ -592,7 +706,9 @@ pub(crate) async fn create_server(
         return Err(ApiError::new(
             StatusCode::BAD_GATEWAY,
             "mcp_failed",
-            status.error.unwrap_or_else(|| "the server did not answer".to_owned()),
+            status
+                .error
+                .unwrap_or_else(|| "the server did not answer".to_owned()),
         ));
     }
     persist_json(&dir(&state.config.store_path), &owner, &record)
@@ -608,12 +724,17 @@ pub(crate) async fn delete_server(
     AxumPath(server_id): AxumPath<String>,
 ) -> Result<StatusCode, ApiError> {
     let Some(record) = record(&state, tenant.tenant(), &server_id) else {
-        return Err(ApiError::not_found(format!("unknown MCP server `{server_id}`")));
+        return Err(ApiError::not_found(format!(
+            "unknown MCP server `{server_id}`"
+        )));
     };
     unmount(&state, &record.id).await;
-    remove_record(&dir(&state.config.store_path), &scope_id(tenant.tenant(), &record.id))
-        .await
-        .map_err(|e| ApiError::internal(format!("mcp server store: {e}")))?;
+    remove_record(
+        &dir(&state.config.store_path),
+        &scope_id(tenant.tenant(), &record.id),
+    )
+    .await
+    .map_err(|e| ApiError::internal(format!("mcp server store: {e}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -628,7 +749,9 @@ pub(crate) async fn remount_server(
         return Err(disabled());
     }
     let Some(record) = record(&state, tenant.tenant(), &server_id) else {
-        return Err(ApiError::not_found(format!("unknown MCP server `{server_id}`")));
+        return Err(ApiError::not_found(format!(
+            "unknown MCP server `{server_id}`"
+        )));
     };
     unmount(&state, &record.id).await;
     let status = mount(&state, tenant.tenant(), &record).await;
@@ -642,13 +765,24 @@ mod tests {
     #[test]
     fn annotations_only_ever_suggest_and_default_to_a_write() {
         assert_eq!(suggested_effect(None), Effect::NonIdempotent);
-        assert_eq!(suggested_effect(Some(&json!({"readOnlyHint": true}))), Effect::ReadOnly);
         assert_eq!(
-            suggested_effect(Some(&json!({"destructiveHint": false, "idempotentHint": true}))),
+            suggested_effect(Some(&json!({"readOnlyHint": true}))),
+            Effect::ReadOnly
+        );
+        assert_eq!(
+            suggested_effect(Some(
+                &json!({"destructiveHint": false, "idempotentHint": true})
+            )),
             Effect::Idempotent
         );
-        assert_eq!(suggested_effect(Some(&json!({"destructiveHint": true}))), Effect::NonIdempotent);
-        assert_eq!(suggested_effect(Some(&json!({"readOnlyHint": false}))), Effect::NonIdempotent);
+        assert_eq!(
+            suggested_effect(Some(&json!({"destructiveHint": true}))),
+            Effect::NonIdempotent
+        );
+        assert_eq!(
+            suggested_effect(Some(&json!({"readOnlyHint": false}))),
+            Effect::NonIdempotent
+        );
     }
 
     #[test]
@@ -663,8 +797,14 @@ mod tests {
 
     #[test]
     fn a_description_always_satisfies_the_contract() {
-        assert_eq!(contract_description("files", "read_file", ""), "read_file on the files MCP server.");
-        assert_eq!(contract_description("files", "read_file", "  Reads\ta file \n"), "Reads a file");
+        assert_eq!(
+            contract_description("files", "read_file", ""),
+            "read_file on the files MCP server."
+        );
+        assert_eq!(
+            contract_description("files", "read_file", "  Reads\ta file \n"),
+            "Reads a file"
+        );
         let long = contract_description("s", "t", &"x".repeat(MAX_TOOL_DESCRIPTION_BYTES + 100));
         assert!(long.len() <= MAX_TOOL_DESCRIPTION_BYTES + 3);
         assert!(long.ends_with('…'));

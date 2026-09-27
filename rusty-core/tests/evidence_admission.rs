@@ -128,7 +128,7 @@ fn golden_run_config_declaration_shape() {
         agent_id: None,
         world: None,
         started_at: None,
-};
+    };
     assert_golden("run_config_declaration.json", &declaration);
 }
 

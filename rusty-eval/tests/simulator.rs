@@ -14,9 +14,9 @@ use rusty_agent_runtime::error::{Result as RuntimeResult, RustyError};
 use rusty_agent_runtime::inbox::{ConsumptionPoint, Inbox, InboxConsumption, InboxKind};
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::react::{create_react_agent_with_recording, MESSAGES_CHANNEL};
+use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::record::RunEventKind;
 use rusty_agent_runtime::state::{Reducer, State, StateSpec};
-use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 use serde_json::{json, Value};
 

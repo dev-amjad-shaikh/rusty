@@ -873,7 +873,10 @@ fn an_open_nested_object_cannot_be_registered() {
     }))
     .unwrap_err()
     .to_string();
-    assert!(err.contains("connection_specification.credentials"), "{err}");
+    assert!(
+        err.contains("connection_specification.credentials"),
+        "{err}"
+    );
     assert!(err.contains("additionalProperties"), "{err}");
 }
 
@@ -968,7 +971,10 @@ fn a_grant_flow_is_part_of_what_the_connector_is() {
     // pointing at the old one.
     assert_ne!(plain.hash, granted.hash);
     assert!(granted.verify_hash());
-    assert_eq!(granted.authorization.as_ref().unwrap().scopes, "channels:read");
+    assert_eq!(
+        granted.authorization.as_ref().unwrap().scopes,
+        "channels:read"
+    );
 }
 
 #[test]

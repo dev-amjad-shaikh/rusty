@@ -625,7 +625,11 @@ pub enum ClosureCriteria {
 /// connection existing.
 pub fn tool_available(tool: &str, available: &[String]) -> bool {
     match tool.strip_suffix(".*") {
-        Some(prefix) => available.iter().any(|a| a.len() > prefix.len() + 1 && a.starts_with(prefix) && a.as_bytes()[prefix.len()] == b'.'),
+        Some(prefix) => available.iter().any(|a| {
+            a.len() > prefix.len() + 1
+                && a.starts_with(prefix)
+                && a.as_bytes()[prefix.len()] == b'.'
+        }),
         None => available.iter().any(|a| a == tool),
     }
 }
@@ -636,11 +640,25 @@ pub fn tool_available(tool: &str, available: &[String]) -> bool {
 /// gap filed before the capability criterion still says what closes it.
 pub fn tools_named(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for raw in text.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '/' | '`' | '"' | '\'')) {
+    for raw in text.split(|c: char| {
+        c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '/' | '`' | '"' | '\'')
+    }) {
         let token = raw.trim_matches(|c: char| !c.is_ascii_alphanumeric());
-        let Some((left, right)) = token.split_once('.') else { continue };
-        let side_ok = |s: &str| s.len() >= 2 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !s.starts_with('-') && !s.ends_with('-');
-        if side_ok(left) && side_ok(right) && !right.contains('.') && !out.iter().any(|t| t == token) {
+        let Some((left, right)) = token.split_once('.') else {
+            continue;
+        };
+        let side_ok = |s: &str| {
+            s.len() >= 2
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && !s.starts_with('-')
+                && !s.ends_with('-')
+        };
+        if side_ok(left)
+            && side_ok(right)
+            && !right.contains('.')
+            && !out.iter().any(|t| t == token)
+        {
             out.push(token.to_owned());
         }
     }
@@ -745,7 +763,9 @@ impl GapLedgerEntry {
     pub fn closes_on_tools(&self) -> Vec<String> {
         match (&self.closure_criteria, &self.subject) {
             (ClosureCriteria::CapabilityPresent { tool }, _) => vec![tool.clone()],
-            (ClosureCriteria::FailureRateBelow { .. }, GapSubject::QuestionShape { .. }) => tools_named(&self.statement),
+            (ClosureCriteria::FailureRateBelow { .. }, GapSubject::QuestionShape { .. }) => {
+                tools_named(&self.statement)
+            }
             _ => Vec::new(),
         }
     }
@@ -1308,7 +1328,10 @@ impl GapLedger {
                 // Only an agent's own re-filing is rate-limited: induction
                 // and a person's filings are measured demand, counted as
                 // given.
-                let repeat = matches!(origin, GapOrigin::AgentDeclared | GapOrigin::Platform | GapOrigin::ZeroRecall) && self.refiled_within_window(&gap_id, actor, at);
+                let repeat = matches!(
+                    origin,
+                    GapOrigin::AgentDeclared | GapOrigin::Platform | GapOrigin::ZeroRecall
+                ) && self.refiled_within_window(&gap_id, actor, at);
                 self.append_mutation(
                     &gap_id,
                     GapMutationKind::Reinforced {
@@ -1744,13 +1767,16 @@ impl GapLedger {
                 ClosureEvidence::BusinessDecision { decision_ref },
             ) => format!("business-decision:{decision_ref}"),
             (
-                ClosureCriteria::FailureRateBelow { .. } | ClosureCriteria::CapabilityPresent { .. },
+                ClosureCriteria::FailureRateBelow { .. }
+                | ClosureCriteria::CapabilityPresent { .. },
                 ClosureEvidence::VerifiedRun { run_id },
             ) => {
                 if entry.status != GapStatus::TrialPending {
                     return Err(GapError::ClosureUnsatisfied {
                         gap: gap_id.to_string(),
-                        reason: "no run claimed this gap; a verified run closes only the gap it claimed".to_string(),
+                        reason:
+                            "no run claimed this gap; a verified run closes only the gap it claimed"
+                                .to_string(),
                     });
                 }
                 format!("run:{run_id}:verified")
@@ -1797,7 +1823,10 @@ impl GapLedger {
             }
             GapStatus::Hunting => self.transition(gap_id, GapStatus::TrialPending, actor, at),
             GapStatus::TrialPending => Ok(()),
-            other => Err(GapError::IllegalTransition { from: other, to: GapStatus::TrialPending }),
+            other => Err(GapError::IllegalTransition {
+                from: other,
+                to: GapStatus::TrialPending,
+            }),
         }
     }
 
@@ -1831,12 +1860,21 @@ impl GapLedger {
             .values()
             .filter(|entry| entry.status != GapStatus::Closed)
             .map(|entry| (entry.gap_id.clone(), entry.closes_on_tools()))
-            .filter(|(_, tools)| !tools.is_empty() && tools.iter().all(|t| tool_available(t, available)))
+            .filter(|(_, tools)| {
+                !tools.is_empty() && tools.iter().all(|t| tool_available(t, available))
+            })
             .collect();
         let mut closed = Vec::new();
         for (gap_id, tools) in due {
             let resolution = format!("capability:{}", tools.join(","));
-            self.append_mutation(&gap_id, GapMutationKind::Closed { resolution: resolution.clone() }, actor, at)?;
+            self.append_mutation(
+                &gap_id,
+                GapMutationKind::Closed {
+                    resolution: resolution.clone(),
+                },
+                actor,
+                at,
+            )?;
             closed.push((gap_id, resolution));
         }
         Ok(closed)
@@ -1850,7 +1888,10 @@ impl GapLedger {
         self.mutations
             .get(gap_id)
             .and_then(|chain| chain.last())
-            .is_some_and(|last| last.actor == actor && at.signed_duration_since(last.at) < chrono::Duration::hours(1))
+            .is_some_and(|last| {
+                last.actor == actor
+                    && at.signed_duration_since(last.at) < chrono::Duration::hours(1)
+            })
     }
 
     /// Score one served turn's outcome against its intent.
@@ -2041,12 +2082,20 @@ impl GapLedger {
     /// actor's — so an agent's own backlog can be read back to it, or to
     /// the Coach reviewing it.
     pub fn filed_by<'a>(&'a self, actor: &'a str) -> impl Iterator<Item = &'a GapLedgerEntry> + 'a {
-        self.entries().filter(move |e| self.mutations.get(&e.gap_id).and_then(|chain| chain.first()).is_some_and(|first| first.actor == actor))
+        self.entries().filter(move |e| {
+            self.mutations
+                .get(&e.gap_id)
+                .and_then(|chain| chain.first())
+                .is_some_and(|first| first.actor == actor)
+        })
     }
 
     /// Who filed the gap: the first mutation's actor.
     pub fn filer(&self, gap_id: &str) -> Option<&str> {
-        self.mutations.get(gap_id).and_then(|chain| chain.first()).map(|m| m.actor.as_str())
+        self.mutations
+            .get(gap_id)
+            .and_then(|chain| chain.first())
+            .map(|m| m.actor.as_str())
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &GapLedgerEntry> + '_ {

@@ -35,7 +35,9 @@ fn probe_registry() -> GraphRegistry {
     use rusty_agent_runtime::prelude::{GraphBuilder, NodeContext, NodeOutput, Reducer, StateSpec};
     let spec = StateSpec::new().channel("done", Reducer::Overwrite);
     let mut builder = GraphBuilder::new();
-    builder.add_node("work", |_ctx: NodeContext| async move { Ok(NodeOutput::update("done", serde_json::json!(true))) });
+    builder.add_node("work", |_ctx: NodeContext| async move {
+        Ok(NodeOutput::update("done", serde_json::json!(true)))
+    });
     builder.set_entry_point("work");
     let mut registry = GraphRegistry::new();
     registry.register("probe", builder.compile().unwrap(), spec);
@@ -753,12 +755,32 @@ async fn a_retired_source_leaves_retrieval_and_a_tombstone() {
     assert_eq!(retired["retired"], true);
     assert_eq!(retired["tombstone"]["reason"], "retired", "{retired}");
     assert_eq!(retired["tombstone"]["source_id"], "stale-note");
-    assert_eq!(retired["tombstone"]["purged_hashes"].as_array().map(|h| h.len()), Some(2), "both versions went: {retired}");
+    assert_eq!(
+        retired["tombstone"]["purged_hashes"]
+            .as_array()
+            .map(|h| h.len()),
+        Some(2),
+        "both versions went: {retired}"
+    );
 
     // Gone from the listing and from retrieval; the tombstone answers for it.
     let (_, listed) = call(&app, "GET", "/knowledge/sources", None).await;
-    assert!(listed["sources"].as_array().unwrap().iter().all(|s| s["source_id"] != "stale-note"), "{listed}");
-    assert!(listed["tombstones"].as_array().unwrap().iter().any(|t| t["source_id"] == "stale-note" && t["reason"] == "retired"), "{listed}");
+    assert!(
+        listed["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["source_id"] != "stale-note"),
+        "{listed}"
+    );
+    assert!(
+        listed["tombstones"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["source_id"] == "stale-note" && t["reason"] == "retired"),
+        "{listed}"
+    );
     let (status, got) = call(&app, "GET", "/knowledge/sources/stale-note", None).await;
     assert_eq!(status, StatusCode::OK, "{got}");
     assert_eq!(got["tombstone"]["reason"], "retired", "{got}");
@@ -767,7 +789,6 @@ async fn a_retired_source_leaves_retrieval_and_a_tombstone() {
 
     let _ = std::fs::remove_dir_all(store);
 }
-
 
 // --------------------------------------------------------------------- //
 // Provenance classes: the organization's own outranks a vendor's, and
@@ -778,7 +799,9 @@ async fn a_retired_source_leaves_retrieval_and_a_tombstone() {
 async fn the_organizations_own_source_outranks_generic_guidance_on_the_same_question() {
     let (app, store) = app();
     // Generic guidance that says the words many more times than the policy does.
-    let generic: String = (0..40).map(|i| format!("line {i:03}: password reset guidance password reset password reset\n")).collect();
+    let generic: String = (0..40)
+        .map(|i| format!("line {i:03}: password reset guidance password reset password reset\n"))
+        .collect();
     let (status, made) = call(&app, "POST", "/knowledge/sources", Some(json!({
         "source_id": "generic-password-advice", "kind": "text", "title": "Password reset — generic guidance", "author": "human:curator",
         "body": generic, "provenance": "generic",
@@ -792,23 +815,53 @@ async fn the_organizations_own_source_outranks_generic_guidance_on_the_same_ques
 
     // The listing says what each is; the default is the organization's own.
     let (_, listed) = call(&app, "GET", "/knowledge/sources", None).await;
-    let by_id = |id: &str| listed["sources"].as_array().unwrap().iter().find(|s| s["source_id"] == id).cloned().unwrap();
-    assert_eq!(by_id("generic-password-advice")["provenance"], "generic", "{listed}");
-    assert_eq!(by_id("password-policy")["provenance"], "organization", "{listed}");
+    let by_id = |id: &str| {
+        listed["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["source_id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(
+        by_id("generic-password-advice")["provenance"],
+        "generic",
+        "{listed}"
+    );
+    assert_eq!(
+        by_id("password-policy")["provenance"],
+        "organization",
+        "{listed}"
+    );
 
     // The policy stands first, however loudly the generic text matches.
-    let (status, answer) = call(&app, "POST", "/knowledge/query", Some(json!({"text": "password reset"}))).await;
+    let (status, answer) = call(
+        &app,
+        "POST",
+        "/knowledge/query",
+        Some(json!({"text": "password reset"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
     let results = answer["results"].as_array().unwrap();
     assert!(results.len() >= 2, "{answer}");
-    assert_eq!(results[0]["citation"]["source_id"], "password-policy", "the organization's own first: {answer}");
-    assert!(results[0]["citation"].get("provenance").is_none(), "the default class is absent on the wire: {answer}");
+    assert_eq!(
+        results[0]["citation"]["source_id"], "password-policy",
+        "the organization's own first: {answer}"
+    );
+    assert!(
+        results[0]["citation"].get("provenance").is_none(),
+        "the default class is absent on the wire: {answer}"
+    );
     assert_eq!(results[1]["citation"]["provenance"], "generic", "{answer}");
-    assert!(results[1]["score"].as_f64().unwrap() > results[0]["score"].as_f64().unwrap(), "the generic hit scored higher and still ranks second: {answer}");
+    assert!(
+        results[1]["score"].as_f64().unwrap() > results[0]["score"].as_f64().unwrap(),
+        "the generic hit scored higher and still ranks second: {answer}"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
-
 
 // --------------------------------------------------------------------- //
 // Fact conflicts: contested until a person rules
@@ -818,8 +871,16 @@ async fn the_organizations_own_source_outranks_generic_guidance_on_the_same_ques
 async fn two_sources_that_disagree_are_contested_until_a_person_rules() {
     let (app, store) = app();
     for (id, title, body) in [
-        ("hours-runbook", "Badge office runbook", "The badge office opens at nine.\n"),
-        ("hours-poster", "Lobby poster", "The badge office opens at ten.\n"),
+        (
+            "hours-runbook",
+            "Badge office runbook",
+            "The badge office opens at nine.\n",
+        ),
+        (
+            "hours-poster",
+            "Lobby poster",
+            "The badge office opens at ten.\n",
+        ),
     ] {
         let (status, made) = call(&app, "POST", "/knowledge/sources", Some(json!({"source_id": id, "kind": "text", "title": title, "author": "human:curator", "body": body}))).await;
         assert_eq!(status, StatusCode::CREATED, "{made}");
@@ -833,7 +894,10 @@ async fn two_sources_that_disagree_are_contested_until_a_person_rules() {
     let filing = json!({"source_a": "hours-runbook", "source_b": "hours-poster", "claim": "when the badge office opens", "a_says": "nine", "b_says": "ten", "why": "a person asked"});
     let (status, filed) = call(&app, "POST", "/knowledge/conflicts", Some(filing.clone())).await;
     assert_eq!(status, StatusCode::CREATED, "{filed}");
-    let id = filed["conflict"]["conflict_id"].as_str().unwrap().to_owned();
+    let id = filed["conflict"]["conflict_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     // The same pair, either order, is the one open conflict.
     let (status, again) = call(&app, "POST", "/knowledge/conflicts", Some(json!({"source_a": "hours-poster", "source_b": "hours-runbook", "claim": "hours", "a_says": "ten", "b_says": "nine"}))).await;
     assert_eq!(status, StatusCode::OK, "{again}");
@@ -841,34 +905,91 @@ async fn two_sources_that_disagree_are_contested_until_a_person_rules() {
     assert_eq!(again["conflict"]["conflict_id"], json!(id));
 
     // Open: both sources' hits are contested, and the note withholds the claim.
-    let (_, answer) = call(&app, "POST", "/knowledge/query", Some(json!({"text": "badge office opens"}))).await;
+    let (_, answer) = call(
+        &app,
+        "POST",
+        "/knowledge/query",
+        Some(json!({"text": "badge office opens"})),
+    )
+    .await;
     let results = answer["results"].as_array().unwrap();
     assert_eq!(results.len(), 2, "{answer}");
-    assert!(results.iter().all(|r| r["contested"]["claim"] == "when the badge office opens"), "{answer}");
+    assert!(
+        results
+            .iter()
+            .all(|r| r["contested"]["claim"] == "when the badge office opens"),
+        "{answer}"
+    );
     let note = answer["note"].as_str().unwrap_or("");
-    assert!(note.contains("CONTESTED") && note.contains("do not state either side"), "{answer}");
+    assert!(
+        note.contains("CONTESTED") && note.contains("do not state either side"),
+        "{answer}"
+    );
 
     // Ruled: the runbook stands; the poster's hit is overruled, the runbook's upheld.
-    let (status, _) = call(&app, "POST", &format!("/knowledge/conflicts/{id}/rule"), Some(json!({"stands": "nope"}))).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/knowledge/conflicts/{id}/rule"),
+        Some(json!({"stands": "nope"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, ruled) = call(&app, "POST", &format!("/knowledge/conflicts/{id}/rule"), Some(json!({"stands": "hours-runbook", "note": "the poster is from last year"}))).await;
+    let (status, ruled) = call(
+        &app,
+        "POST",
+        &format!("/knowledge/conflicts/{id}/rule"),
+        Some(json!({"stands": "hours-runbook", "note": "the poster is from last year"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{ruled}");
-    let (status, _) = call(&app, "POST", &format!("/knowledge/conflicts/{id}/rule"), Some(json!({"stands": "hours-poster"}))).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/knowledge/conflicts/{id}/rule"),
+        Some(json!({"stands": "hours-poster"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "ruled once");
-    let (_, answer) = call(&app, "POST", "/knowledge/query", Some(json!({"text": "badge office opens"}))).await;
-    let by_id = |id: &str| answer["results"].as_array().unwrap().iter().find(|r| r["citation"]["source_id"] == id).cloned().unwrap();
-    assert!(by_id("hours-runbook").get("contested").is_none(), "{answer}");
+    let (_, answer) = call(
+        &app,
+        "POST",
+        "/knowledge/query",
+        Some(json!({"text": "badge office opens"})),
+    )
+    .await;
+    let by_id = |id: &str| {
+        answer["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["citation"]["source_id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert!(
+        by_id("hours-runbook").get("contested").is_none(),
+        "{answer}"
+    );
     assert_eq!(by_id("hours-runbook")["upheld"]["over"], "Lobby poster");
-    assert_eq!(by_id("hours-poster")["overruled"]["stands"], "Badge office runbook");
-    assert_eq!(by_id("hours-poster")["overruled"]["note"], "the poster is from last year");
-    assert!(answer["note"].as_str().unwrap_or("").contains("RULED"), "{answer}");
+    assert_eq!(
+        by_id("hours-poster")["overruled"]["stands"],
+        "Badge office runbook"
+    );
+    assert_eq!(
+        by_id("hours-poster")["overruled"]["note"],
+        "the poster is from last year"
+    );
+    assert!(
+        answer["note"].as_str().unwrap_or("").contains("RULED"),
+        "{answer}"
+    );
     let (_, listed) = call(&app, "GET", "/knowledge/conflicts", None).await;
     assert_eq!(listed["open"], 0);
     assert_eq!(listed["conflicts"][0]["stands"], "hours-runbook");
 
     let _ = std::fs::remove_dir_all(store);
 }
-
 
 // --------------------------------------------------------------------- //
 // The compiled knowledge unit: provenance order, blocked while contested
@@ -877,11 +998,27 @@ async fn two_sources_that_disagree_are_contested_until_a_person_rules() {
 #[tokio::test]
 async fn the_knowledge_unit_compiles_by_provenance_and_waits_for_a_ruling() {
     let (app, store) = app();
-    let (status, made) = call(&app, "POST", "/assistants", Some(json!({"assistant_id": "desk", "name": "Desk", "graph": "probe", "config": {}}))).await;
+    let (status, made) = call(
+        &app,
+        "POST",
+        "/assistants",
+        Some(json!({"assistant_id": "desk", "name": "Desk", "graph": "probe", "config": {}})),
+    )
+    .await;
     assert!(status.is_success(), "{made}");
     for (id, title, body, class) in [
-        ("zz-policy", "Zulu policy", "Badges are renewed every year.", "organization"),
-        ("aa-generic", "Alpha generic", "Badges are renewed whenever.", "generic"),
+        (
+            "zz-policy",
+            "Zulu policy",
+            "Badges are renewed every year.",
+            "organization",
+        ),
+        (
+            "aa-generic",
+            "Alpha generic",
+            "Badges are renewed whenever.",
+            "generic",
+        ),
     ] {
         let (status, made) = call(&app, "POST", "/knowledge/sources", Some(json!({"source_id": id, "kind": "text", "title": title, "author": "human:curator", "body": body, "provenance": class}))).await;
         assert_eq!(status, StatusCode::CREATED, "{made}");
@@ -890,10 +1027,19 @@ async fn the_knowledge_unit_compiles_by_provenance_and_waits_for_a_ruling() {
     assert!(empty["unit"].is_null(), "{empty}");
 
     // The organization's own first, though its title sorts last.
-    let (status, compiled) = call(&app, "POST", "/assistants/desk/knowledge/unit", Some(json!({"source_ids": ["aa-generic", "zz-policy"]}))).await;
+    let (status, compiled) = call(
+        &app,
+        "POST",
+        "/assistants/desk/knowledge/unit",
+        Some(json!({"source_ids": ["aa-generic", "zz-policy"]})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{compiled}");
     let text = compiled["unit"]["text"].as_str().unwrap();
-    assert!(text.find("Zulu policy").unwrap() < text.find("Alpha generic").unwrap(), "{text}");
+    assert!(
+        text.find("Zulu policy").unwrap() < text.find("Alpha generic").unwrap(),
+        "{text}"
+    );
     assert_eq!(compiled["unit"]["version"], 1);
     assert_eq!(compiled["unit"]["sources"][0]["source_id"], "zz-policy");
 
@@ -901,20 +1047,59 @@ async fn the_knowledge_unit_compiles_by_provenance_and_waits_for_a_ruling() {
     let (status, filed) = call(&app, "POST", "/knowledge/conflicts", Some(json!({"source_a": "zz-policy", "source_b": "aa-generic", "claim": "how often badges renew", "a_says": "yearly", "b_says": "whenever"}))).await;
     assert_eq!(status, StatusCode::CREATED, "{filed}");
     let (_, read) = call(&app, "GET", "/assistants/desk/knowledge/unit", None).await;
-    assert_eq!(read["contested"][0]["claim"], "how often badges renew", "{read}");
-    let (status, refused) = call(&app, "POST", "/assistants/desk/knowledge/unit", Some(json!({"source_ids": ["aa-generic", "zz-policy"]}))).await;
+    assert_eq!(
+        read["contested"][0]["claim"], "how often badges renew",
+        "{read}"
+    );
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/assistants/desk/knowledge/unit",
+        Some(json!({"source_ids": ["aa-generic", "zz-policy"]})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-    assert!(refused["message"].as_str().unwrap().contains("how often badges renew"), "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("how often badges renew"),
+        "{refused}"
+    );
     let id = filed["conflict"]["conflict_id"].as_str().unwrap();
-    let (status, _) = call(&app, "POST", &format!("/knowledge/conflicts/{id}/rule"), Some(json!({"stands": "zz-policy"}))).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/knowledge/conflicts/{id}/rule"),
+        Some(json!({"stands": "zz-policy"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, compiled) = call(&app, "POST", "/assistants/desk/knowledge/unit", Some(json!({"source_ids": ["aa-generic", "zz-policy"]}))).await;
+    let (status, compiled) = call(
+        &app,
+        "POST",
+        "/assistants/desk/knowledge/unit",
+        Some(json!({"source_ids": ["aa-generic", "zz-policy"]})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{compiled}");
     assert_eq!(compiled["unit"]["version"], 2);
-    assert!(compiled["unit"]["text"].as_str().unwrap().contains("Overruled on \"how often badges renew\": Zulu policy stands"), "{compiled}");
+    assert!(
+        compiled["unit"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Overruled on \"how often badges renew\": Zulu policy stands"),
+        "{compiled}"
+    );
 
     // A new version of a source makes the unit stale; removing it stops it.
-    let (status, corrected) = call(&app, "POST", "/knowledge/sources/zz-policy/correct", Some(json!({"author": "human:curator", "body": "Badges are renewed every two years."}))).await;
+    let (status, corrected) = call(
+        &app,
+        "POST",
+        "/knowledge/sources/zz-policy/correct",
+        Some(json!({"author": "human:curator", "body": "Badges are renewed every two years."})),
+    )
+    .await;
     assert!(status.is_success(), "{corrected}");
     let (_, read) = call(&app, "GET", "/assistants/desk/knowledge/unit", None).await;
     assert_eq!(read["stale"][0]["source_id"], "zz-policy", "{read}");

@@ -28,7 +28,7 @@ use chrono::{DateTime, Utc};
 use rusty_agent_runtime::connector::ConnectorManifest;
 use rusty_agent_runtime::skill::{SkillPackage, SkillSource};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::auth::TenantContext;
 use crate::error::ApiError;

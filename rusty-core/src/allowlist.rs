@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::{Result, RustyError};
-use crate::package::{CapabilityDecl, PackageId, PackageKind, PackageManifest, PublisherId, Version};
+use crate::package::{
+    CapabilityDecl, PackageId, PackageKind, PackageManifest, PublisherId, Version,
+};
 
 // ---------------------------------------------------------------------------
 // Error helper
@@ -217,7 +219,10 @@ impl AllowlistChecker {
     /// Check whether `manifest` at `version` may install.
     pub fn check(&self, manifest: &PackageManifest, version: &Version) -> AllowlistOutcome {
         // AC 6: revocation overrides every mode.
-        if let Some(reason) = self.revocations.get(&(manifest.id.clone(), version.clone())) {
+        if let Some(reason) = self
+            .revocations
+            .get(&(manifest.id.clone(), version.clone()))
+        {
             return AllowlistOutcome::Revoked {
                 reason: reason.clone(),
             };
@@ -240,7 +245,12 @@ impl AllowlistChecker {
                         publisher: manifest.publisher.clone(),
                         version: version.clone(),
                         capabilities: manifest.capabilities.clone(),
-                        egress: manifest.capabilities.egress.iter().map(|e| e.host.clone()).collect(),
+                        egress: manifest
+                            .capabilities
+                            .egress
+                            .iter()
+                            .map(|e| e.host.clone())
+                            .collect(),
                         secret_refs: manifest
                             .capabilities
                             .secret_refs
@@ -528,7 +538,10 @@ mod tests {
         );
         let checker = AllowlistChecker::new(policy);
         let m = manifest("any-pkg", v(1, 0, 0));
-        assert!(matches!(checker.check(&m, &v(1, 0, 0)), AllowlistOutcome::PendingApproval(_)));
+        assert!(matches!(
+            checker.check(&m, &v(1, 0, 0)),
+            AllowlistOutcome::PendingApproval(_)
+        ));
     }
 
     #[test]
@@ -544,7 +557,10 @@ mod tests {
         );
         let checker = AllowlistChecker::new(policy);
         let m = manifest("pkg", v(2, 0, 0));
-        assert!(matches!(checker.check(&m, &v(2, 0, 0)), AllowlistOutcome::PendingApproval(_)));
+        assert!(matches!(
+            checker.check(&m, &v(2, 0, 0)),
+            AllowlistOutcome::PendingApproval(_)
+        ));
     }
 
     #[test]
@@ -561,8 +577,14 @@ mod tests {
         let checker = AllowlistChecker::new(policy);
         let m_clean = manifest("pkg", v(1, 0, 0));
         let m_egress = manifest_with_egress("pkg", v(1, 0, 0));
-        assert_eq!(checker.check(&m_clean, &v(1, 0, 0)), AllowlistOutcome::Permitted);
-        assert!(matches!(checker.check(&m_egress, &v(1, 0, 0)), AllowlistOutcome::PendingApproval(_)));
+        assert_eq!(
+            checker.check(&m_clean, &v(1, 0, 0)),
+            AllowlistOutcome::Permitted
+        );
+        assert!(matches!(
+            checker.check(&m_egress, &v(1, 0, 0)),
+            AllowlistOutcome::PendingApproval(_)
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -577,7 +599,9 @@ mod tests {
         let checker = AllowlistChecker::new(policy).with_revocations(revocations);
         let m = manifest("bad-pkg", v(1, 0, 0));
         let outcome = checker.check(&m, &v(1, 0, 0));
-        assert!(matches!(outcome, AllowlistOutcome::Revoked { reason } if reason == "cve-2026-1234"));
+        assert!(
+            matches!(outcome, AllowlistOutcome::Revoked { reason } if reason == "cve-2026-1234")
+        );
     }
 
     #[test]

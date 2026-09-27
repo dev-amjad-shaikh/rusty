@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::error::{LlmErrorClass, Result, RustyError};
 
@@ -2126,8 +2126,8 @@ mod tests {
         std::net::SocketAddr,
         std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) {
-        use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc as StdArc;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::executor::{Executor, RunConfig};
 use rusty_agent_runtime::journal::{Clock, Journal};
@@ -23,12 +23,12 @@ use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall, U
 use rusty_agent_runtime::prelude::{
     GraphBuilder, NodeContext, NodeOutput, Reducer, State, StateSpec,
 };
-use rusty_agent_runtime::react::{MESSAGES_CHANNEL, create_react_agent_with_recording};
+use rusty_agent_runtime::react::{create_react_agent_with_recording, MESSAGES_CHANNEL};
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};
 
 use rusty_eval::span_query::{
-    AttributePredicate, PredicateOp, SPAN_VOCABULARY, SPAN_VOCABULARY_VERSION, SpanConstraint,
-    SpanQuery, SpanSelection, evaluate_query,
+    evaluate_query, AttributePredicate, PredicateOp, SpanConstraint, SpanQuery, SpanSelection,
+    SPAN_VOCABULARY, SPAN_VOCABULARY_VERSION,
 };
 use rusty_eval::trace::{AttributeValue, SpanTree, TraceSpan};
 
@@ -555,11 +555,9 @@ fn unknown_attributes_fail_at_authoring_time() {
     );
 
     // The vocabulary is published for suite authors.
-    assert!(
-        SPAN_VOCABULARY
-            .iter()
-            .any(|entry| entry.attribute == "tool")
-    );
+    assert!(SPAN_VOCABULARY
+        .iter()
+        .any(|entry| entry.attribute == "tool"));
 }
 
 #[test]

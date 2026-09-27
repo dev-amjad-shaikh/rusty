@@ -971,7 +971,11 @@ async fn recorded_source() -> Value {
     // one occurrence — a run pauses to ask before an unapproved charge now.
     let charge = ToolCall::new("c1", "charge", json!({"amount": 42}));
     let approval = rusty_agent_runtime::effects::ApprovalToken::approve(
-        tools.get("charge").unwrap().effect_request(&charge).effect_id("source-run-1"),
+        tools
+            .get("charge")
+            .unwrap()
+            .effect_request(&charge)
+            .effect_id("source-run-1"),
         "ops:test",
     );
     let outcome = Executor::new()

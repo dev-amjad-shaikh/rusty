@@ -208,7 +208,13 @@ impl EgressPolicy {
                 }
                 // `**` is only meaningful as the last segment; anywhere else
                 // it would be a literal nobody intends.
-                if rule.path_pattern.split('/').rev().skip(1).any(|seg| seg == "**") {
+                if rule
+                    .path_pattern
+                    .split('/')
+                    .rev()
+                    .skip(1)
+                    .any(|seg| seg == "**")
+                {
                     return Some(format!(
                         "policies[{pi}].rules[{ri}].path_pattern may only end with **"
                     ));
@@ -664,12 +670,10 @@ mod tests {
                 originating: vec![],
             }],
         };
-        assert!(
-            policy
-                .validate()
-                .unwrap()
-                .contains("path_pattern must start with")
-        );
+        assert!(policy
+            .validate()
+            .unwrap()
+            .contains("path_pattern must start with"));
     }
 
     // -----------------------------------------------------------------

@@ -60,9 +60,8 @@ pub use curation::{curate, CuratedConnector, CuratedOperation, CurationRule};
 pub use instance::{ConnectorInstance, INSTANCE_ID_PREFIX, MAX_INSTANCE_ID_LEN};
 pub use lint::{lint as lint_manifest, LintFinding};
 pub use manifest::{
-    Authorization,
-    render_template, scan_placeholders, ConnectorManifest, ConnectorOperation, HttpMethod,
-    OperationAuth, OperationEffect,
+    render_template, scan_placeholders, Authorization, ConnectorManifest, ConnectorOperation,
+    HttpMethod, OperationAuth, OperationEffect,
 };
 pub use openapi::{diff_imports, import_openapi, OpenApiImport, UnmappedOperation};
 

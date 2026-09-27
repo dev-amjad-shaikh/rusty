@@ -37,7 +37,11 @@ impl MemoryStore for ScopedMemoryStore {
     }
 
     async fn get(&self, memory_id: &str) -> Result<Option<MemoryRecord>> {
-        Ok(self.inner.get(memory_id).await?.filter(|record| self.admits(record)))
+        Ok(self
+            .inner
+            .get(memory_id)
+            .await?
+            .filter(|record| self.admits(record)))
     }
 
     async fn all(&self) -> Result<Vec<MemoryRecord>> {

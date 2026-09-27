@@ -19,19 +19,19 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::error::Result as RustyResult;
 use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, RunConfig};
 use rusty_agent_runtime::graph::GraphBuilder;
 use rusty_agent_runtime::invariant::{
-    AssertionRequest, CheckingChatModel, InvariantChecker, InvariantViolation, RequestAssertion,
-    derive_expected_messages,
+    derive_expected_messages, AssertionRequest, CheckingChatModel, InvariantChecker,
+    InvariantViolation, RequestAssertion,
 };
 use rusty_agent_runtime::journal::{Clock, Journal, PARENT_EVENT_KEY};
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::node::{NodeContext, NodeOutput};
-use rusty_agent_runtime::react::{AGENT_NODE, MESSAGES_CHANNEL, create_react_agent_with_recording};
+use rusty_agent_runtime::react::{create_react_agent_with_recording, AGENT_NODE, MESSAGES_CHANNEL};
 use rusty_agent_runtime::record::{RunEvent, RunEventKind};
 use rusty_agent_runtime::state::{Reducer, State, StateSpec};
 use rusty_agent_runtime::tool::{Tool, ToolRegistry};

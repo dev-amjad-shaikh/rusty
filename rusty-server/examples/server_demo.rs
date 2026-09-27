@@ -27,11 +27,11 @@ use rusty_agent_runtime::connector::{
 };
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::builtins::{
-    CalculatorTool, KnowledgeDocument, SandboxedDocumentReaderTool,
-    TextInspectorTool,
+    CalculatorTool, KnowledgeDocument, SandboxedDocumentReaderTool, TextInspectorTool,
 };
 use rusty_agent_server::{
-    serve, GovernedKnowledgeSearchTool, GraphRegistry, ServerConfig, ShippedPlugin, ShippedSkillPack,
+    serve, GovernedKnowledgeSearchTool, GraphRegistry, ServerConfig, ShippedPlugin,
+    ShippedSkillPack,
 };
 use serde_json::{json, Value};
 
@@ -296,20 +296,26 @@ fn stage_delay() -> std::time::Duration {
 /// (`{"chat_template_kwargs": {"enable_thinking": false}}`).
 /// The one handle every graph and the verifier hold, filled when the
 /// react graph is built.
-static MODEL_HANDLE: std::sync::OnceLock<std::sync::Arc<rusty_agent_runtime::llm::SwappableChatModel>> = std::sync::OnceLock::new();
+static MODEL_HANDLE: std::sync::OnceLock<
+    std::sync::Arc<rusty_agent_runtime::llm::SwappableChatModel>,
+> = std::sync::OnceLock::new();
 
 fn chat_model() -> (Arc<dyn ChatModel>, String) {
     let (Ok(base_url), Ok(model)) = (
         std::env::var("RUSTY_LLM_BASE_URL"),
         std::env::var("RUSTY_LLM_MODEL"),
     ) else {
-        return (Arc::new(HarnessDemoModel), "local harness model (deterministic, no network)".to_owned());
+        return (
+            Arc::new(HarnessDemoModel),
+            "local harness model (deterministic, no network)".to_owned(),
+        );
     };
     let label = format!("{model} via {base_url}");
-    let mut client = OpenAiCompatibleClient::new(&base_url, std::env::var("RUSTY_LLM_API_KEY").ok(), model);
+    let mut client =
+        OpenAiCompatibleClient::new(&base_url, std::env::var("RUSTY_LLM_API_KEY").ok(), model);
     if let Ok(raw) = std::env::var("RUSTY_LLM_EXTRA_BODY") {
-        let extra: serde_json::Map<String, Value> = serde_json::from_str(&raw)
-            .expect("RUSTY_LLM_EXTRA_BODY must be a JSON object");
+        let extra: serde_json::Map<String, Value> =
+            serde_json::from_str(&raw).expect("RUSTY_LLM_EXTRA_BODY must be a JSON object");
         client = client.with_extra_body(extra);
     }
     // What the model costs, per million tokens in and out — operator
@@ -360,7 +366,10 @@ fn build_react_graph(
     let (model, model_label) = chat_model();
     // The graph holds its model behind a handle the providers configuration
     // swaps; the boot model is what the environment says until then.
-    let handle = std::sync::Arc::new(rusty_agent_runtime::llm::SwappableChatModel::new(model, model_label.clone()));
+    let handle = std::sync::Arc::new(rusty_agent_runtime::llm::SwappableChatModel::new(
+        model,
+        model_label.clone(),
+    ));
     MODEL_HANDLE.get_or_init(|| std::sync::Arc::clone(&handle));
     let model: Arc<dyn ChatModel> = handle;
     let graph = create_react_agent(model, tools.clone())?;
@@ -368,7 +377,10 @@ fn build_react_graph(
     // steps (revised with the turns since, never re-summarised whole).
     let spec = StateSpec::new()
         .channel("messages", Reducer::AddMessages)
-        .channel(rusty_agent_runtime::react::COMPACTION_CHANNEL, Reducer::Overwrite);
+        .channel(
+            rusty_agent_runtime::react::COMPACTION_CHANNEL,
+            Reducer::Overwrite,
+        );
     Ok((graph, spec, tools, model_label))
 }
 
@@ -645,7 +657,6 @@ fn servicenow_pack() -> ConnectorManifest {
     .expect("the ServiceNow demo pack validates")
 }
 
-
 /// The connector library this demo ships — the ServiceNow pack built here
 /// and every `catalog/*/manifest.json` — through the server config, so it
 /// registers at boot with no caller. A manifest without a hash is sealed
@@ -653,13 +664,20 @@ fn servicenow_pack() -> ConnectorManifest {
 fn shipped_connector_packs() -> Vec<ConnectorManifest> {
     let mut packs = vec![servicenow_pack()];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog");
-    let Ok(entries) = std::fs::read_dir(&root) else { return packs };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return packs;
+    };
     for entry in entries.flatten() {
         let manifest_path = entry.path().join("manifest.json");
-        let Ok(text) = std::fs::read_to_string(&manifest_path) else { continue };
+        let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+            continue;
+        };
         match serde_json::from_str::<ConnectorManifest>(&text) {
             Ok(manifest) => packs.push(manifest),
-            Err(error) => eprintln!("connector manifest {} skipped: {error}", manifest_path.display()),
+            Err(error) => eprintln!(
+                "connector manifest {} skipped: {error}",
+                manifest_path.display()
+            ),
         }
     }
     packs
@@ -678,7 +696,8 @@ fn context_budget() -> u32 {
 /// The skill library: `catalog/skill-sources.json`, the places a builder can
 /// import skills from. Missing or malformed reads as an empty library, logged.
 fn skill_library() -> Vec<rusty_agent_server::SkillLibrarySource> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog/skill-sources.json");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog/skill-sources.json");
     let read = std::fs::read_to_string(&path)
         .map_err(|e| e.to_string())
         .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()));
@@ -694,19 +713,29 @@ fn skill_library() -> Vec<rusty_agent_server::SkillLibrarySource> {
 /// The plugins under `catalog/plugins/*` — each directory's files by path,
 /// `plugin.json` at its root — offered in the library, installed by a person.
 fn shipped_plugins() -> Vec<ShippedPlugin> {
-    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    fn walk(
+        base: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let path = entry.path();
             if path.is_dir() {
                 walk(base, &path, out);
             } else if let Ok(bytes) = std::fs::read(&path) {
-                let rel = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                let rel = path
+                    .strip_prefix(base)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
                 out.insert(rel, bytes);
             }
         }
     }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog/plugins");
-    let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
     let mut packs = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
@@ -725,12 +754,17 @@ fn shipped_plugins() -> Vec<ShippedPlugin> {
 /// register at boot with no caller.
 fn shipped_skill_packs() -> Vec<ShippedSkillPack> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog/skills");
-    let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
     let mut packs = Vec::new();
     for entry in entries.flatten() {
         let pack = entry.path();
-        let Ok(skill_md) = std::fs::read(pack.join("SKILL.md")) else { continue };
-        let mut files: std::collections::BTreeMap<String, Vec<u8>> = std::collections::BTreeMap::new();
+        let Ok(skill_md) = std::fs::read(pack.join("SKILL.md")) else {
+            continue;
+        };
+        let mut files: std::collections::BTreeMap<String, Vec<u8>> =
+            std::collections::BTreeMap::new();
         files.insert("SKILL.md".to_owned(), skill_md);
         let refs_dir = pack.join("references");
         if refs_dir.is_dir() {
@@ -740,7 +774,10 @@ fn shipped_skill_packs() -> Vec<ShippedSkillPack> {
                 files.insert(format!("references/{path}"), text.into_bytes());
             }
         }
-        packs.push(ShippedSkillPack { files, author: "rusty-demo".to_owned() });
+        packs.push(ShippedSkillPack {
+            files,
+            author: "rusty-demo".to_owned(),
+        });
     }
     packs
 }
@@ -787,13 +824,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     ])?;
     let mcp_tools = rusty_agent_server::McpTools::new();
     let platform_tools = rusty_agent_server::PlatformTools::new();
-    let (react, react_spec, react_tools, react_model) =
-        build_react_graph(
-            std::sync::Arc::clone(&connection_tools),
-            std::sync::Arc::clone(&knowledge_tool),
-            std::sync::Arc::clone(&mcp_tools),
-            std::sync::Arc::clone(&platform_tools),
-        )?;
+    let (react, react_spec, react_tools, react_model) = build_react_graph(
+        std::sync::Arc::clone(&connection_tools),
+        std::sync::Arc::clone(&knowledge_tool),
+        std::sync::Arc::clone(&mcp_tools),
+        std::sync::Arc::clone(&platform_tools),
+    )?;
     let (deep_dive, deep_dive_spec) = build_deep_dive_graph()?;
     let (agent_builder, agent_builder_spec) = build_agent_builder_graph()?;
     let (tool_builder, tool_builder_spec) = build_tool_builder_graph()?;
@@ -830,14 +866,30 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .with_mcp_tools(mcp_tools)
     // The Composer's doors; the server seeds the Composer at boot.
     .with_platform_tools(platform_tools)
-    .with_mcp_stdio(std::env::var("RUSTY_MCP_STDIO").map(|v| v == "1").unwrap_or(false))
-    .with_restore_from_opt(std::env::var("RUSTY_RESTORE_FROM").ok().filter(|v| !v.is_empty()))
-    .with_backup_dir_opt(std::env::var("RUSTY_BACKUP_DIR").ok().filter(|v| !v.is_empty()))
+    .with_mcp_stdio(
+        std::env::var("RUSTY_MCP_STDIO")
+            .map(|v| v == "1")
+            .unwrap_or(false),
+    )
+    .with_restore_from_opt(
+        std::env::var("RUSTY_RESTORE_FROM")
+            .ok()
+            .filter(|v| !v.is_empty()),
+    )
+    .with_backup_dir_opt(
+        std::env::var("RUSTY_BACKUP_DIR")
+            .ok()
+            .filter(|v| !v.is_empty()),
+    )
     // A product has people. The first boot creates the administrator and
     // hands its password over in a file next to the store. RUSTY_OPEN=1 is
     // the explicit way to run without sign-in — a laptop, a test harness —
     // and a production boot refuses it regardless.
-    .with_bootstrap_admin(std::env::var("RUSTY_OPEN").map(|v| v != "1").unwrap_or(true))
+    .with_bootstrap_admin(
+        std::env::var("RUSTY_OPEN")
+            .map(|v| v != "1")
+            .unwrap_or(true),
+    )
     // Where a builder can import skills from. Pointers, not content —
     // nothing is fetched until someone asks.
     .with_skill_library(skill_library())
@@ -845,7 +897,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // How long agents.ask waits for the asked agent (its run, and a
     // person's decision when it pauses): RUSTY_ASK_WAIT_SECS, 150 by default.
     .with_ask_wait(std::time::Duration::from_secs(
-        std::env::var("RUSTY_ASK_WAIT_SECS").ok().and_then(|s| s.trim().parse::<u64>().ok()).filter(|n| (5..=3600).contains(n)).unwrap_or(150),
+        std::env::var("RUSTY_ASK_WAIT_SECS")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .filter(|n| (5..=3600).contains(n))
+            .unwrap_or(150),
     ))
     // A nightly sweep of every suite: RUSTY_SWEEP_AT=HH:MM (UTC). Unset, the
     // sweep is the button on Evals.
@@ -873,7 +929,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
     // A run ends when the model stops; whether it achieved the outcome is
     // asked of a judge — the same model — unless RUSTY_VERIFY_OUTCOMES=0.
-    let config = if std::env::var("RUSTY_VERIFY_OUTCOMES").map(|v| v == "0").unwrap_or(false) {
+    let config = if std::env::var("RUSTY_VERIFY_OUTCOMES")
+        .map(|v| v == "0")
+        .unwrap_or(false)
+    {
         config
     } else {
         config.with_verifier(match MODEL_HANDLE.get() {
@@ -940,11 +999,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 };
                 let roles: Vec<_> = roles
                     .split('+')
-                    .map(|r| rusty_agent_server::Role::parse(r).unwrap_or_else(|| panic!("RUSTY_PRINCIPALS: unknown role `{r}`")))
+                    .map(|r| {
+                        rusty_agent_server::Role::parse(r)
+                            .unwrap_or_else(|| panic!("RUSTY_PRINCIPALS: unknown role `{r}`"))
+                    })
                     .collect();
                 config = config.with_principal(
                     "default",
-                    rusty_agent_server::Principal { id: id.to_string(), name: id.to_string(), kind, roles },
+                    rusty_agent_server::Principal {
+                        id: id.to_string(),
+                        name: id.to_string(),
+                        kind,
+                        roles,
+                    },
                     key.to_string(),
                 );
             }
@@ -959,9 +1026,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("\nrusty-server demo on http://{base}");
     println!("  react_agent model: {react_model}");
     if config.bootstrap_admin {
-        println!(
-            "\n  first boot seeds an administrator — sign in before the curl menu below:"
-        );
+        println!("\n  first boot seeds an administrator — sign in before the curl menu below:");
         println!("    password file: <store>/bootstrap-admin.txt (next to the checkpoint store)");
         println!("  curl -s -c /tmp/rusty-cookies.txt -X POST http://{base}/auth/login \\");
         println!("    -H 'content-type: application/json' \\");

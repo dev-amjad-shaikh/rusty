@@ -115,7 +115,8 @@ pub fn problems(d: &ConnectorDraft) -> Vec<String> {
     if !d.base_url.trim().starts_with("https://") || d.base_url.trim().len() < 12 {
         out.push("The API root must start with https://.".to_owned());
     }
-    if !(d.documentation_url.starts_with("https://") || d.documentation_url.starts_with("http://")) {
+    if !(d.documentation_url.starts_with("https://") || d.documentation_url.starts_with("http://"))
+    {
         out.push("Link to its documentation.".to_owned());
     }
     if matches!(d.auth, AuthStyle::Header | AuthStyle::Query) && d.auth_name.trim().is_empty() {
@@ -129,7 +130,11 @@ pub fn problems(d: &ConnectorDraft) -> Vec<String> {
     }
     let mut seen = std::collections::HashSet::new();
     for (i, op) in d.operations.iter().enumerate() {
-        let label = if op.name.trim().is_empty() { format!("Operation {}", i + 1) } else { format!("Operation {}", op.name.trim()) };
+        let label = if op.name.trim().is_empty() {
+            format!("Operation {}", i + 1)
+        } else {
+            format!("Operation {}", op.name.trim())
+        };
         let id = kebab(&op.name);
         if id.is_empty() {
             out.push(format!("{label}: give it a name."));
@@ -137,38 +142,67 @@ pub fn problems(d: &ConnectorDraft) -> Vec<String> {
             out.push(format!("{label}: that name is used twice."));
         }
         if id == "check" {
-            out.push(format!("{label}: `check` is the name of the test read the server adds."));
+            out.push(format!(
+                "{label}: `check` is the name of the test read the server adds."
+            ));
         }
         if op.description.trim().is_empty() {
-            out.push(format!("{label}: say what it does — the model reads this to choose it."));
+            out.push(format!(
+                "{label}: say what it does — the model reads this to choose it."
+            ));
         }
-        if !matches!(op.method.to_ascii_uppercase().as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
-            out.push(format!("{label}: the method is GET, POST, PUT, PATCH or DELETE."));
+        if !matches!(
+            op.method.to_ascii_uppercase().as_str(),
+            "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+        ) {
+            out.push(format!(
+                "{label}: the method is GET, POST, PUT, PATCH or DELETE."
+            ));
         }
-        if !matches!(op.effect.as_str(), "read_only" | "idempotent" | "compensatable" | "irreversible") {
-            out.push(format!("{label}: the effect is read_only, idempotent, compensatable or irreversible."));
+        if !matches!(
+            op.effect.as_str(),
+            "read_only" | "idempotent" | "compensatable" | "irreversible"
+        ) {
+            out.push(format!(
+                "{label}: the effect is read_only, idempotent, compensatable or irreversible."
+            ));
         }
         if !op.path.trim().starts_with('/') {
             out.push(format!("{label}: the path starts with /."));
         }
         let mut rest = op.path.as_str();
         while let Some(start) = rest.find('{') {
-            let Some(end) = rest[start..].find('}') else { break };
+            let Some(end) = rest[start..].find('}') else {
+                break;
+            };
             let name = &rest[start + 1..start + end];
             if !op.params.iter().any(|p| p.name == name) {
-                out.push(format!("{label}: {{{name}}} in the path needs a parameter of that name."));
+                out.push(format!(
+                    "{label}: {{{name}}} in the path needs a parameter of that name."
+                ));
             }
             rest = &rest[start + end + 1..];
         }
         for p in &op.params {
             let ok = !p.name.is_empty()
-                && p.name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && p.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                && p.name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && p.name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_');
             if !ok {
                 out.push(format!("{label}: “{}” is not a parameter name.", p.name));
             }
-            if !matches!(p.r#type.as_str(), "string" | "integer" | "number" | "boolean") {
-                out.push(format!("{label}: parameter {} has an unknown type.", p.name));
+            if !matches!(
+                p.r#type.as_str(),
+                "string" | "integer" | "number" | "boolean"
+            ) {
+                out.push(format!(
+                    "{label}: parameter {} has an unknown type.",
+                    p.name
+                ));
             }
         }
     }
@@ -178,24 +212,39 @@ pub fn problems(d: &ConnectorDraft) -> Vec<String> {
 fn auth_for(d: &ConnectorDraft) -> Vec<Value> {
     match d.auth {
         AuthStyle::Bearer => vec![json!({"style": "bearer", "token": "{credentials.token}"})],
-        AuthStyle::Basic => vec![json!({"style": "basic", "username": "{credentials.username}", "password": "{credentials.password}"})],
-        AuthStyle::Header => vec![json!({"style": "header", "name": d.auth_name.trim(), "value_template": "{credentials.token}"})],
-        AuthStyle::Query => vec![json!({"style": "query", "name": d.auth_name.trim(), "value_template": "{credentials.token}"})],
+        AuthStyle::Basic => vec![
+            json!({"style": "basic", "username": "{credentials.username}", "password": "{credentials.password}"}),
+        ],
+        AuthStyle::Header => vec![
+            json!({"style": "header", "name": d.auth_name.trim(), "value_template": "{credentials.token}"}),
+        ],
+        AuthStyle::Query => vec![
+            json!({"style": "query", "name": d.auth_name.trim(), "value_template": "{credentials.token}"}),
+        ],
         AuthStyle::None => vec![],
     }
 }
 
 fn specification_for(d: &ConnectorDraft) -> Value {
     let credentials = match d.auth {
-        AuthStyle::None => return json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        AuthStyle::None => {
+            return json!({"type": "object", "properties": {}, "additionalProperties": false})
+        }
         AuthStyle::Basic => json!({
             "username": {"type": "string", "description": "Username", "rusty_order": 1},
             "password": {"type": "string", "description": "Password", "rusty_secret": true, "rusty_order": 2}
         }),
-        AuthStyle::Bearer => json!({"token": {"type": "string", "description": "API token (sent as a bearer token)", "rusty_secret": true}}),
-        AuthStyle::Header | AuthStyle::Query => json!({"token": {"type": "string", "description": format!("Credential (sent as {} “{}”)", if d.auth == AuthStyle::Header { "header" } else { "query parameter" }, d.auth_name.trim()), "rusty_secret": true}}),
+        AuthStyle::Bearer => {
+            json!({"token": {"type": "string", "description": "API token (sent as a bearer token)", "rusty_secret": true}})
+        }
+        AuthStyle::Header | AuthStyle::Query => {
+            json!({"token": {"type": "string", "description": format!("Credential (sent as {} “{}”)", if d.auth == AuthStyle::Header { "header" } else { "query parameter" }, d.auth_name.trim()), "rusty_secret": true}})
+        }
     };
-    let required: Vec<String> = credentials.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
+    let required: Vec<String> = credentials
+        .as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
     json!({
         "type": "object",
         "properties": {"credentials": {"type": "object", "properties": credentials, "required": required, "additionalProperties": false}},
@@ -279,8 +328,8 @@ pub(crate) async fn register_described(
     draft: &ConnectorDraft,
 ) -> Result<(ConnectorManifest, bool), String> {
     let value = compose_manifest(draft).map_err(|problems| problems.join(" "))?;
-    let manifest: ConnectorManifest =
-        serde_json::from_value(value).map_err(|e| format!("the composed manifest does not parse: {e}"))?;
+    let manifest: ConnectorManifest = serde_json::from_value(value)
+        .map_err(|e| format!("the composed manifest does not parse: {e}"))?;
     manifest.validate().map_err(|e| e.to_string())?;
     let manifest = manifest.sealed().map_err(|e| e.to_string())?;
     let registered = state
@@ -307,8 +356,14 @@ pub(crate) async fn describe(
         .map(|op| format!("{}.{}", manifest.id, op.name))
         .collect();
     Ok((
-        if registered { StatusCode::CREATED } else { StatusCode::OK },
-        Json(json!({ "id": manifest.id, "hash": manifest.hash, "registered": registered, "tools": tools })),
+        if registered {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(
+            json!({ "id": manifest.id, "hash": manifest.hash, "registered": registered, "tools": tools }),
+        ),
     ))
 }
 
@@ -333,8 +388,18 @@ mod tests {
                     path: "/customers/{customer_id}/invoices".into(),
                     effect: "read_only".into(),
                     params: vec![
-                        ParamDraft { name: "customer_id".into(), r#type: "string".into(), required: true, description: "The customer".into() },
-                        ParamDraft { name: "limit".into(), r#type: "integer".into(), required: false, description: String::new() },
+                        ParamDraft {
+                            name: "customer_id".into(),
+                            r#type: "string".into(),
+                            required: true,
+                            description: "The customer".into(),
+                        },
+                        ParamDraft {
+                            name: "limit".into(),
+                            r#type: "integer".into(),
+                            required: false,
+                            description: String::new(),
+                        },
                     ],
                     reconcile: None,
                 },
@@ -344,7 +409,12 @@ mod tests {
                     method: "POST".into(),
                     path: "/invoices/{id}/void".into(),
                     effect: "irreversible".into(),
-                    params: vec![ParamDraft { name: "id".into(), r#type: "string".into(), required: true, description: String::new() }],
+                    params: vec![ParamDraft {
+                        name: "id".into(),
+                        r#type: "string".into(),
+                        required: true,
+                        description: String::new(),
+                    }],
                     reconcile: None,
                 },
             ],
@@ -357,8 +427,25 @@ mod tests {
         d.operations[0].params.clear();
         assert_eq!(problems(&d), vec!["Operation List invoices: {customer_id} in the path needs a parameter of that name."]);
         assert!(problems(&draft()).is_empty());
-        let empty = ConnectorDraft { name: String::new(), description: String::new(), base_url: String::new(), documentation_url: String::new(), auth: AuthStyle::Bearer, auth_name: String::new(), check_path: "/".into(), operations: vec![] };
-        assert_eq!(problems(&empty), vec!["Name the system.", "The API root must start with https://.", "Link to its documentation.", "Describe at least one operation."]);
+        let empty = ConnectorDraft {
+            name: String::new(),
+            description: String::new(),
+            base_url: String::new(),
+            documentation_url: String::new(),
+            auth: AuthStyle::Bearer,
+            auth_name: String::new(),
+            check_path: "/".into(),
+            operations: vec![],
+        };
+        assert_eq!(
+            problems(&empty),
+            vec![
+                "Name the system.",
+                "The API root must start with https://.",
+                "Link to its documentation.",
+                "Describe at least one operation."
+            ]
+        );
     }
 
     #[test]
@@ -372,7 +459,11 @@ mod tests {
         assert_eq!(sealed.check, "check");
         let names: Vec<&str> = sealed.operations.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(names, vec!["check", "list-invoices", "void-invoice"]);
-        assert_eq!(sealed.connection_specification["properties"]["credentials"]["properties"]["token"]["rusty_secret"], true);
+        assert_eq!(
+            sealed.connection_specification["properties"]["credentials"]["properties"]["token"]
+                ["rusty_secret"],
+            true
+        );
         assert!(!sealed.hash.is_empty());
     }
 }

@@ -61,24 +61,41 @@ struct Finished {
 }
 
 /// What the journals say happened in the window.
-fn read_window(journals: &[rusty_agent_runtime::journal::JournalSnapshot], since: DateTime<Utc>) -> Vec<Finished> {
+fn read_window(
+    journals: &[rusty_agent_runtime::journal::JournalSnapshot],
+    since: DateTime<Utc>,
+) -> Vec<Finished> {
     let mut out = Vec::new();
     for snapshot in journals {
-        let Some(first) = snapshot.events.first() else { continue };
-        let Some(last) = snapshot.events.last() else { continue };
+        let Some(first) = snapshot.events.first() else {
+            continue;
+        };
+        let Some(last) = snapshot.events.last() else {
+            continue;
+        };
         if last.recorded_at < since {
             continue;
         }
-        let tokens: u64 = snapshot.events.iter().filter_map(|e| e.tokens.as_ref()).map(|u| u.total_tokens).sum();
+        let tokens: u64 = snapshot
+            .events
+            .iter()
+            .filter_map(|e| e.tokens.as_ref())
+            .map(|u| u.total_tokens)
+            .sum();
         let model_calls = snapshot
             .events
             .iter()
             .filter(|e| matches!(e.kind, rusty_agent_runtime::record::RunEventKind::ModelCall))
             .count() as u64;
-        let failed = snapshot.events.iter().any(|e| matches!(e.status, rusty_agent_runtime::record::EventStatus::Error));
+        let failed = snapshot
+            .events
+            .iter()
+            .any(|e| matches!(e.status, rusty_agent_runtime::record::EventStatus::Error));
         out.push(Finished {
             ended_at: last.recorded_at,
-            took_ms: (last.recorded_at - first.recorded_at).num_milliseconds().max(0),
+            took_ms: (last.recorded_at - first.recorded_at)
+                .num_milliseconds()
+                .max(0),
             tokens,
             model_calls,
             failed,
@@ -90,7 +107,13 @@ fn read_window(journals: &[rusty_agent_runtime::journal::JournalSnapshot], since
 
 /// The sentence the numbers support about what would bite first, and
 /// nothing beyond it.
-fn bites_first(running: usize, queued: usize, per_thread: usize, finished: &[Finished], p95_ms: Option<i64>) -> String {
+fn bites_first(
+    running: usize,
+    queued: usize,
+    per_thread: usize,
+    finished: &[Finished],
+    p95_ms: Option<i64>,
+) -> String {
     if queued > 0 {
         return format!(
             "{queued} run(s) are waiting behind {running} running: this deployment admits {per_thread} run(s) per thread at a time, so a thread with work stacked on it is the bound in front of you now."
@@ -117,23 +140,40 @@ pub(crate) async fn get_capacity(
     Extension(tenant): Extension<TenantContext>,
     Query(query): Query<WindowQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let minutes = query.minutes.unwrap_or(DEFAULT_MINUTES).clamp(1, 7 * 24 * 60);
+    let minutes = query
+        .minutes
+        .unwrap_or(DEFAULT_MINUTES)
+        .clamp(1, 7 * 24 * 60);
     let since = Utc::now() - Duration::minutes(minutes);
 
     // Now: what the run manager is holding.
     let live = state.run_deps.manager.list().await;
-    let running = live.iter().filter(|(_, i)| i.status.as_str() == "running").count();
-    let queued = live.iter().filter(|(_, i)| i.status.as_str() == "pending").count();
+    let running = live
+        .iter()
+        .filter(|(_, i)| i.status.as_str() == "running")
+        .count();
+    let queued = live
+        .iter()
+        .filter(|(_, i)| i.status.as_str() == "pending")
+        .count();
 
     // Now: delegated outcomes and queued work.
-    let assignments = state.server_store.list_assignments(Some(tenant.tenant())).await.unwrap_or_default();
+    let assignments = state
+        .server_store
+        .list_assignments(Some(tenant.tenant()))
+        .await
+        .unwrap_or_default();
     let mut by_state: BTreeMap<String, usize> = BTreeMap::new();
     for a in &assignments {
         *by_state.entry(a.state.clone()).or_default() += 1;
     }
 
     // The window, from the journals.
-    let journals = state.server_store.list_journals().await.map_err(ApiError::internal)?;
+    let journals = state
+        .server_store
+        .list_journals()
+        .await
+        .map_err(ApiError::internal)?;
     let finished = read_window(&journals, since);
     let mut durations: Vec<i64> = finished.iter().map(|f| f.took_ms).collect();
     durations.sort_unstable();
@@ -141,7 +181,11 @@ pub(crate) async fn get_capacity(
     let p95 = percentile(&durations, 0.95);
     let tokens: u64 = finished.iter().map(|f| f.tokens).sum();
     let failures = finished.iter().filter(|f| f.failed).count();
-    let per_minute = if minutes > 0 { finished.len() as f64 / minutes as f64 } else { 0.0 };
+    let per_minute = if minutes > 0 {
+        finished.len() as f64 / minutes as f64
+    } else {
+        0.0
+    };
 
     let counts = crate::estate::counts(&state.config.store_path);
     let restored = crate::estate::restored(&state.config.store_path);
@@ -235,20 +279,35 @@ pub(crate) async fn probe(
         let tenant = tenant.clone();
         let assistant = assistant.clone();
         let message = message.clone();
-        running.push(tokio::spawn(async move { one_copy(&state, &tenant, &assistant, &message).await }));
+        running.push(tokio::spawn(async move {
+            one_copy(&state, &tenant, &assistant, &message).await
+        }));
     }
     let mut out = Vec::with_capacity(copies);
     for handle in running {
         match handle.await {
             Ok(copy) => out.push(copy),
-            Err(error) => out.push(Copy { run_id: None, status: "lost".to_owned(), took_ms: 0, error: Some(error.to_string()) }),
+            Err(error) => out.push(Copy {
+                run_id: None,
+                status: "lost".to_owned(),
+                took_ms: 0,
+                error: Some(error.to_string()),
+            }),
         }
     }
     let wall_ms = began.elapsed().as_millis() as i64;
-    let mut durations: Vec<i64> = out.iter().filter(|c| c.status == "success").map(|c| c.took_ms).collect();
+    let mut durations: Vec<i64> = out
+        .iter()
+        .filter(|c| c.status == "success")
+        .map(|c| c.took_ms)
+        .collect();
     durations.sort_unstable();
     let succeeded = durations.len();
-    let per_minute = if wall_ms > 0 { succeeded as f64 * 60_000.0 / wall_ms as f64 } else { 0.0 };
+    let per_minute = if wall_ms > 0 {
+        succeeded as f64 * 60_000.0 / wall_ms as f64
+    } else {
+        0.0
+    };
     // What the runs actually did. An agent whose graph never reaches a
     // model answers in milliseconds, and a throughput number from that
     // measures the scheduler and the store, not agent work. The report
@@ -257,10 +316,21 @@ pub(crate) async fn probe(
     let mut model_calls = 0u64;
     let mut tokens = 0u64;
     for copy in out.iter().filter(|c| c.run_id.is_some()) {
-        let usage = crate::llm_providers::run_usage(&state, copy.run_id.as_deref().unwrap_or_default()).await;
-        model_calls += usage.get("model_calls").and_then(Value::as_u64).unwrap_or(0);
-        tokens += usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0)
-            + usage.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0);
+        let usage =
+            crate::llm_providers::run_usage(&state, copy.run_id.as_deref().unwrap_or_default())
+                .await;
+        model_calls += usage
+            .get("model_calls")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        tokens += usage
+            .get("prompt_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            + usage
+                .get("completion_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
     }
     let measured = if model_calls == 0 {
         "the run plumbing only: these runs reached no model, so this is what the scheduler, the graph and the store carry, not what agents carry"
@@ -297,7 +367,12 @@ pub(crate) async fn probe(
 }
 
 /// One copy: a fresh thread and a real run of the agent, waited out.
-async fn one_copy(state: &Arc<AppState>, tenant: &TenantContext, assistant: &crate::assistants::AssistantRecord, message: &str) -> Copy {
+async fn one_copy(
+    state: &Arc<AppState>,
+    tenant: &TenantContext,
+    assistant: &crate::assistants::AssistantRecord,
+    message: &str,
+) -> Copy {
     let began = Instant::now();
     let thread_id = uuid::Uuid::new_v4().to_string();
     let internal_thread_id = crate::auth::scope_id(tenant.tenant(), &thread_id);
@@ -310,16 +385,34 @@ async fn one_copy(state: &Arc<AppState>, tenant: &TenantContext, assistant: &cra
         seed_length: None,
         created_at: Utc::now(),
     };
-    if let Err(error) = state.server_store.create_thread(&internal_thread_id, &record).await {
-        return Copy { run_id: None, status: "refused".to_owned(), took_ms: began.elapsed().as_millis() as i64, error: Some(error.to_string()) };
+    if let Err(error) = state
+        .server_store
+        .create_thread(&internal_thread_id, &record)
+        .await
+    {
+        return Copy {
+            run_id: None,
+            status: "refused".to_owned(),
+            took_ms: began.elapsed().as_millis() as i64,
+            error: Some(error.to_string()),
+        };
     }
     let mut payload = crate::runs::RunPayload {
         input: Some(json!({"messages": [{"role": "user", "content": message}]})),
-        metadata: Some(json!({"channel": "capacity-probe", "created_by": tenant.attribution(), "on_behalf_of": tenant.attribution()})),
+        metadata: Some(
+            json!({"channel": "capacity-probe", "created_by": tenant.attribution(), "on_behalf_of": tenant.attribution()}),
+        ),
         assistant_id: Some(assistant.assistant_id.clone()),
         ..crate::runs::RunPayload::default()
     };
-    crate::routes::apply_assistant_defaults(state, tenant.tenant(), &internal_thread_id, assistant, &mut payload).await;
+    crate::routes::apply_assistant_defaults(
+        state,
+        tenant.tenant(),
+        &internal_thread_id,
+        assistant,
+        &mut payload,
+    )
+    .await;
     let scheduled = match crate::runs::schedule(
         &state.run_deps,
         &internal_thread_id,
@@ -331,21 +424,38 @@ async fn one_copy(state: &Arc<AppState>, tenant: &TenantContext, assistant: &cra
     .await
     {
         Ok(scheduled) => scheduled,
-        Err(error) => return Copy { run_id: None, status: "refused".to_owned(), took_ms: began.elapsed().as_millis() as i64, error: Some(format!("{error:?}")) },
+        Err(error) => {
+            return Copy {
+                run_id: None,
+                status: "refused".to_owned(),
+                took_ms: began.elapsed().as_millis() as i64,
+                error: Some(format!("{error:?}")),
+            }
+        }
     };
     let run_id = scheduled.run_id.clone();
     // Wait it out, the way a caller of /runs/wait does.
     for _ in 0..1200 {
         match state.run_deps.manager.info(&run_id).await {
             Some(info) if info.status.is_terminal() => {
-                return Copy { run_id: Some(run_id), status: info.status.as_str().to_owned(), took_ms: began.elapsed().as_millis() as i64, error: None };
+                return Copy {
+                    run_id: Some(run_id),
+                    status: info.status.as_str().to_owned(),
+                    took_ms: began.elapsed().as_millis() as i64,
+                    error: None,
+                };
             }
             Some(_) => {}
             None => break,
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-    Copy { run_id: Some(run_id), status: "unfinished".to_owned(), took_ms: began.elapsed().as_millis() as i64, error: Some("the run had not finished when the probe stopped waiting".to_owned()) }
+    Copy {
+        run_id: Some(run_id),
+        status: "unfinished".to_owned(),
+        took_ms: began.elapsed().as_millis() as i64,
+        error: Some("the run had not finished when the probe stopped waiting".to_owned()),
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +472,13 @@ mod tests {
     }
 
     fn finished(took_ms: i64, model_calls: u64) -> Finished {
-        Finished { ended_at: Utc::now(), took_ms, tokens: 100, model_calls, failed: false }
+        Finished {
+            ended_at: Utc::now(),
+            took_ms,
+            tokens: 100,
+            model_calls,
+            failed: false,
+        }
     }
 
     #[test]
@@ -374,7 +490,10 @@ mod tests {
 
         // Nothing finished: the report refuses to guess and says what to do.
         let empty = bites_first(0, 0, 1, &[], None);
-        assert!(empty.contains("nothing here says what would bite first"), "{empty}");
+        assert!(
+            empty.contains("nothing here says what would bite first"),
+            "{empty}"
+        );
         assert!(empty.contains("probe"), "{empty}");
 
         // Slow runs full of model calls: the route, not the box.
@@ -384,6 +503,9 @@ mod tests {
 
         // Fast and idle: no claim at all.
         let idle = bites_first(0, 0, 1, &[finished(400, 1)], Some(400));
-        assert!(idle.contains("does not show the wait before a run starts"), "{idle}");
+        assert!(
+            idle.contains("does not show the wait before a run starts"),
+            "{idle}"
+        );
     }
 }

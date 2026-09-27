@@ -233,7 +233,9 @@ async fn mid_session_memory_edit_surfaces_in_suffix_not_prefix() {
     // changes every turn, so anything after it would never be cached).
     let suffix = &calls[1][1..];
     assert!(
-        suffix.iter().any(|m| m.content.as_deref() == Some("new instruction after memory edit")),
+        suffix
+            .iter()
+            .any(|m| m.content.as_deref() == Some("new instruction after memory edit")),
         "the edit must surface in the mutable suffix: {suffix:?}"
     );
 }

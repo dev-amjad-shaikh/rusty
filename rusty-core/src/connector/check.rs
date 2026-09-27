@@ -289,11 +289,8 @@ fn render_auth(auth: &OperationAuth, config: &serde_json::Value) -> Result<Rende
                     // The refusal, in the identity provider's own words. Only
                     // the two declared OAuth error fields are quoted — never
                     // the raw body, which can carry material we did not send.
-                    let field = |key: &str| {
-                        body.get(key)
-                            .and_then(|v| v.as_str())
-                            .map(str::to_owned)
-                    };
+                    let field =
+                        |key: &str| body.get(key).and_then(|v| v.as_str()).map(str::to_owned);
                     let said = match (field("error"), field("error_description")) {
                         (Some(code), Some(why)) => format!("{code}: {why}"),
                         (Some(code), None) => code,
@@ -363,7 +360,9 @@ pub async fn execute_check(
             "the system rejected the connector's request ({words}) — this is the connector's shape (a header, path or body it sends), not your credentials; report it against the connector"
         ))
     } else if (500..600).contains(&response.status) {
-        CheckOutcome::failed(format!("the system failed on its side ({words}); try again later"))
+        CheckOutcome::failed(format!(
+            "the system failed on its side ({words}); try again later"
+        ))
     } else {
         CheckOutcome::failed(words)
     }

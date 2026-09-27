@@ -179,12 +179,6 @@ mod approvals;
 mod chain_spend;
 mod memory_scope;
 
-mod memory_utility;
-mod memory_consolidation;
-mod post_run_review;
-mod verifier_suite;
-mod skill_proposals;
-mod plugins;
 mod artifacts;
 mod assistants;
 mod auth;
@@ -192,56 +186,64 @@ mod broker;
 pub mod capsule_policy;
 mod capsules;
 pub mod connectors;
-pub mod users;
+mod memory_consolidation;
+mod memory_utility;
+mod plugins;
+mod post_run_review;
+mod skill_proposals;
 mod skills_import;
+pub mod users;
+mod verifier_suite;
 pub use skills_import::SkillLibrarySource;
 mod mcp_servers;
 pub use mcp_servers::McpTools;
 pub mod verify_outcome;
 pub use verify_outcome::Verifier;
-mod connector_draft;
-pub mod platform_tools;
 pub mod assignments;
+pub mod campaign;
+pub mod capacity;
+mod connector_draft;
 pub mod egress_ceiling;
 pub mod estate;
-pub mod campaign;
-pub mod worlds;
-pub mod notices;
-pub mod vault;
 pub mod forget;
-pub mod oidc;
-pub mod scim;
 pub mod freshness;
-pub mod capacity;
-pub mod promotion;
 pub mod llm_providers;
-pub mod variables;
+pub mod notices;
+pub mod oidc;
+pub mod platform_tools;
+pub mod promotion;
+pub mod scim;
 pub mod skill_learn;
-pub use platform_tools::PlatformTools;
+pub mod variables;
+pub mod vault;
+pub mod worlds;
 pub use auth::{dev_principal, scopes_for_roles, Principal, PrincipalKind, Role};
 pub use connectors::ConnectionTools;
+pub use platform_tools::PlatformTools;
+mod accepted_runs;
 mod coordination;
 mod crons;
+mod dataset_runs;
 mod deploy;
 mod error;
 mod evaluations;
 mod gaps;
-mod knowledge_edits;
-mod goal;
 mod gate;
+mod goal;
 mod health;
 mod journals;
 mod knowledge;
+mod knowledge_conflicts;
+mod knowledge_edits;
+mod knowledge_units;
 mod learn;
 mod mcp_bridge;
 mod memory;
 pub mod oauth;
 mod outbox;
-mod accepted_runs;
-mod dataset_runs;
 mod pending_runs;
-mod pool_worker;
 mod policy;
+mod pool_worker;
 pub mod protocol;
 mod receipts;
 mod registry;
@@ -251,11 +253,9 @@ mod routes;
 mod runs;
 mod server_store;
 mod skills;
+mod spawned;
 mod sse;
 mod store;
-mod knowledge_conflicts;
-mod knowledge_units;
-mod spawned;
 mod supervision;
 mod tasks;
 mod threads;
@@ -441,7 +441,11 @@ impl GraphRegistry {
         tools.capabilities()?;
         self.entries.insert(
             name.into(),
-            GraphEntry { graph, spec, registry: Some(tools.clone()) },
+            GraphEntry {
+                graph,
+                spec,
+                registry: Some(tools.clone()),
+            },
         );
         Ok(self)
     }
@@ -471,7 +475,11 @@ impl GraphRegistry {
 
     /// The graph's exact executable tools, sorted by stable tool name.
     pub fn tool_capabilities(&self, name: &str) -> Vec<rusty_agent_runtime::tool::ToolCapability> {
-        let Some(registry) = self.entries.get(name).and_then(|entry| entry.registry.as_ref()) else {
+        let Some(registry) = self
+            .entries
+            .get(name)
+            .and_then(|entry| entry.registry.as_ref())
+        else {
             return Vec::new();
         };
         match registry.capabilities() {
@@ -1003,10 +1011,7 @@ impl ServerConfig {
     /// to start without authentication.
     /// Builder-style: the cell connection tools are sourced from. The same
     /// `Arc` must be attached to the graph registry that should see them.
-    pub fn with_connection_tools(
-        mut self,
-        cell: Arc<crate::connectors::ConnectionTools>,
-    ) -> Self {
+    pub fn with_connection_tools(mut self, cell: Arc<crate::connectors::ConnectionTools>) -> Self {
         self.connection_tools = Some(cell);
         self
     }
@@ -1047,7 +1052,10 @@ impl ServerConfig {
     }
 
     /// Connector manifests to register at boot (see `connector_packs`).
-    pub fn with_connector_packs(mut self, packs: Vec<rusty_agent_runtime::connector::ConnectorManifest>) -> Self {
+    pub fn with_connector_packs(
+        mut self,
+        packs: Vec<rusty_agent_runtime::connector::ConnectorManifest>,
+    ) -> Self {
         self.connector_packs = packs;
         self
     }
@@ -1078,7 +1086,10 @@ impl ServerConfig {
 
     /// Builder-style: the swappable model handle the graphs hold, so the
     /// providers a person configures (`/llm/providers`) take effect live.
-    pub fn with_model_handle(mut self, handle: Arc<rusty_agent_runtime::llm::SwappableChatModel>) -> Self {
+    pub fn with_model_handle(
+        mut self,
+        handle: Arc<rusty_agent_runtime::llm::SwappableChatModel>,
+    ) -> Self {
         self.model_handle = Some(handle);
         self
     }
@@ -1172,7 +1183,9 @@ impl ServerConfig {
     /// Whether the environment declares this a production server
     /// (`RUSTY_ENV=production`).
     pub fn production_from_env() -> bool {
-        std::env::var("RUSTY_ENV").map(|v| v.eq_ignore_ascii_case("production")).unwrap_or(false)
+        std::env::var("RUSTY_ENV")
+            .map(|v| v.eq_ignore_ascii_case("production"))
+            .unwrap_or(false)
     }
 
     pub fn auth_enabled(&self) -> bool {
@@ -1195,12 +1208,20 @@ impl ServerConfig {
     ) -> Self {
         let tenant = tenant.into();
         let key = key.into();
-        assert!(!key.is_empty(), "API key for principal `{}` must not be empty", principal.id);
+        assert!(
+            !key.is_empty(),
+            "API key for principal `{}` must not be empty",
+            principal.id
+        );
         assert!(!principal.id.is_empty(), "a principal needs an id");
         // Keep the tenant/key lookup working for everything that already
         // reads it; the principal is the richer answer on top.
         let mut with_tenant = self.with_tenant_key(tenant.clone(), key.clone());
-        with_tenant.principals.push(PrincipalConfig { tenant, principal, key });
+        with_tenant.principals.push(PrincipalConfig {
+            tenant,
+            principal,
+            key,
+        });
         with_tenant
     }
 

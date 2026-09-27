@@ -476,9 +476,7 @@ impl SubagentRegistry {
     /// This is the registry-residue assertion: after teardown it must be
     /// `true`.
     pub fn scope_is_empty(&self, scope: &SubagentScope) -> bool {
-        self.by_scope
-            .get(scope.as_str())
-            .is_none_or(Vec::is_empty)
+        self.by_scope.get(scope.as_str()).is_none_or(Vec::is_empty)
     }
 
     /// Verify a dispatch request against the target provider's descriptor.

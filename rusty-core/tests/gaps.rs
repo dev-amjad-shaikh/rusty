@@ -25,14 +25,13 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use rusty_agent_runtime::gaps::{ActorRef, EventSource, GapError};
 use rusty_agent_runtime::gaps::{
-    AdjacencySource, Citation, CitationKind, ClosureCriteria, ClosureEvidence, GapLedger,
-    GapLedgerEntry, GapMutationKind, GapOrigin, GapStatus, GapSubject, InteractionChannel,
-    InteractionEvent, InteractionOutcome, JudgeVote, MAX_EMPTY_PROBES, OutcomeAnnotation,
-    OutcomeClass, PROBE_BACKOFF_BASE_MILLIS, ResolutionPath,
-    tools_named, tool_available,
+    tool_available, tools_named, AdjacencySource, Citation, CitationKind, ClosureCriteria,
+    ClosureEvidence, GapLedger, GapLedgerEntry, GapMutationKind, GapOrigin, GapStatus, GapSubject,
+    InteractionChannel, InteractionEvent, InteractionOutcome, JudgeVote, OutcomeAnnotation,
+    OutcomeClass, ResolutionPath, MAX_EMPTY_PROBES, PROBE_BACKOFF_BASE_MILLIS,
 };
+use rusty_agent_runtime::gaps::{ActorRef, EventSource, GapError};
 
 // ---------- golden-file machinery ----------
 
@@ -658,12 +657,10 @@ fn expiry_respects_the_backoff_schedule() {
         .unwrap();
     // One empty probe: the deadline is one base interval after the probe.
     let too_early = ts(2_000 + PROBE_BACKOFF_BASE_MILLIS - 1);
-    assert!(
-        ledger
-            .expire_parked(too_early, "decay-clock")
-            .unwrap()
-            .is_empty()
-    );
+    assert!(ledger
+        .expire_parked(too_early, "decay-clock")
+        .unwrap()
+        .is_empty());
     let at_deadline = ts(2_000 + PROBE_BACKOFF_BASE_MILLIS);
     assert_eq!(
         ledger.expire_parked(at_deadline, "decay-clock").unwrap(),
@@ -809,13 +806,11 @@ fn a_business_decision_closes_a_blocked_gap() {
         .unwrap();
     let entry = ledger.entry(&gap_id).unwrap();
     assert_eq!(entry.status, GapStatus::Closed);
-    assert!(
-        entry
-            .resolution
-            .as_deref()
-            .unwrap()
-            .starts_with("business-decision:")
-    );
+    assert!(entry
+        .resolution
+        .as_deref()
+        .unwrap()
+        .starts_with("business-decision:"));
 }
 
 #[test]
@@ -1362,9 +1357,12 @@ fn snapshots_written_before_annotations_still_load() {
     assert_eq!(restored.failure_rate_millis("odyssey-login"), Some(1000));
 }
 
-
 fn run_citation(run_id: &str) -> Citation {
-    Citation { kind: CitationKind::RunReceipt, id: run_id.to_owned(), note: None }
+    Citation {
+        kind: CitationKind::RunReceipt,
+        id: run_id.to_owned(),
+        note: None,
+    }
 }
 
 #[test]
@@ -1388,28 +1386,67 @@ fn a_gap_naming_tools_closes_when_they_are_all_available() {
         .unwrap();
     let named = ledger
         .file_gap(
-            GapSubject::QuestionShape { text: "what is in my intake notes".into() },
+            GapSubject::QuestionShape {
+                text: "what is in my intake notes".into(),
+            },
             "A memory tool to read the desk's saved intake notes",
             vec![run_citation("run-2")],
             GapOrigin::AgentDeclared,
-            ClosureCriteria::CapabilityPresent { tool: "memory.recall".into() },
+            ClosureCriteria::CapabilityPresent {
+                tool: "memory.recall".into(),
+            },
             1,
             0,
             "desk",
             ts(2_000),
         )
         .unwrap();
-    assert_eq!(ledger.entry(&legacy).unwrap().closes_on_tools(), vec!["microsoft-365.list-service-health".to_owned()]);
+    assert_eq!(
+        ledger.entry(&legacy).unwrap().closes_on_tools(),
+        vec!["microsoft-365.list-service-health".to_owned()]
+    );
     // Only the memory tool is available: the named gap closes, the legacy one waits.
-    let closed = ledger.close_on_capabilities(&["memory.recall".to_owned(), "slack.list-users".to_owned()], "sweep", ts(3_000)).unwrap();
-    assert_eq!(closed, vec![(named.clone(), "capability:memory.recall".to_owned())]);
+    let closed = ledger
+        .close_on_capabilities(
+            &["memory.recall".to_owned(), "slack.list-users".to_owned()],
+            "sweep",
+            ts(3_000),
+        )
+        .unwrap();
+    assert_eq!(
+        closed,
+        vec![(named.clone(), "capability:memory.recall".to_owned())]
+    );
     assert_eq!(ledger.entry(&legacy).unwrap().status, GapStatus::Open);
     // The connection lands: the legacy gap closes on the tool it named.
-    let closed = ledger.close_on_capabilities(&["memory.recall".to_owned(), "microsoft-365.list-service-health".to_owned()], "connection", ts(4_000)).unwrap();
-    assert_eq!(closed, vec![(legacy.clone(), "capability:microsoft-365.list-service-health".to_owned())]);
-    assert_eq!(ledger.entry(&legacy).unwrap().resolution.as_deref(), Some("capability:microsoft-365.list-service-health"));
+    let closed = ledger
+        .close_on_capabilities(
+            &[
+                "memory.recall".to_owned(),
+                "microsoft-365.list-service-health".to_owned(),
+            ],
+            "connection",
+            ts(4_000),
+        )
+        .unwrap();
+    assert_eq!(
+        closed,
+        vec![(
+            legacy.clone(),
+            "capability:microsoft-365.list-service-health".to_owned()
+        )]
+    );
+    assert_eq!(
+        ledger.entry(&legacy).unwrap().resolution.as_deref(),
+        Some("capability:microsoft-365.list-service-health")
+    );
     // Evidence the tool arrived also satisfies the typed criterion directly.
-    let err = ledger.evaluate_closure(&named, &ClosureEvidence::CapabilitiesAvailable { tools: vec![] }, "api", ts(5_000));
+    let err = ledger.evaluate_closure(
+        &named,
+        &ClosureEvidence::CapabilitiesAvailable { tools: vec![] },
+        "api",
+        ts(5_000),
+    );
     assert!(err.is_ok(), "an already-closed gap is a no-op");
 }
 
@@ -1419,11 +1456,15 @@ fn refiling_within_the_hour_keeps_the_evidence_but_not_the_volume() {
     let file = |ledger: &mut GapLedger, run: &str, at: DateTime<Utc>| {
         ledger
             .file_gap(
-                GapSubject::QuestionShape { text: "read the mac's management record".into() },
+                GapSubject::QuestionShape {
+                    text: "read the mac's management record".into(),
+                },
                 "No Jamf connector: jamf-pro.get-computer",
                 vec![run_citation(run)],
                 GapOrigin::AgentDeclared,
-                ClosureCriteria::CapabilityPresent { tool: "jamf-pro.get-computer".into() },
+                ClosureCriteria::CapabilityPresent {
+                    tool: "jamf-pro.get-computer".into(),
+                },
                 3,
                 0,
                 "desk",
@@ -1434,13 +1475,22 @@ fn refiling_within_the_hour_keeps_the_evidence_but_not_the_volume() {
     let id = file(&mut ledger, "run-1", ts(0));
     file(&mut ledger, "run-2", ts(600_000)); // ten minutes later, the same agent
     let entry = ledger.entry(&id).unwrap();
-    assert_eq!(entry.volume, 3, "the second filing within the hour is one observation");
+    assert_eq!(
+        entry.volume, 3,
+        "the second filing within the hour is one observation"
+    );
     assert_eq!(entry.evidence.len(), 2, "its run is still cited");
     file(&mut ledger, "run-3", ts(2 * 3_600_000));
-    assert_eq!(ledger.entry(&id).unwrap().volume, 6, "two hours on, the demand counts again");
-    assert_eq!(tools_named("Use okta.get-user, then e.g. slack.list-users; not sys_id.number"), vec!["okta.get-user", "slack.list-users"]);
+    assert_eq!(
+        ledger.entry(&id).unwrap().volume,
+        6,
+        "two hours on, the demand counts again"
+    );
+    assert_eq!(
+        tools_named("Use okta.get-user, then e.g. slack.list-users; not sys_id.number"),
+        vec!["okta.get-user", "slack.list-users"]
+    );
 }
-
 
 #[test]
 fn a_platform_gap_on_a_connector_closes_when_any_of_its_operations_arrives() {
@@ -1461,11 +1511,36 @@ fn a_platform_gap_on_a_connector_closes_when_any_of_its_operations_arrives() {
     // Every run re-files it; within the hour that is one observation.
     ledger.file_gap(GapSubject::QuestionShape { text: "connector:microsoft-intune".into() }, "The `laptop-troubleshooting` skill assumes a connection to `microsoft-intune` (its tools `microsoft-intune.*`), and none exists on this platform.", vec![run_citation("run-2")], GapOrigin::Platform, ClosureCriteria::CapabilityPresent { tool: "microsoft-intune.*".into() }, 1, 0, "platform:dependency-check", ts(60_000)).unwrap();
     assert_eq!(ledger.entry(&id).unwrap().volume, 1);
-    assert!(ledger.close_on_capabilities(&["microsoft-365.get-user".to_owned(), "microsoft-intune-lite.x".to_owned()], "sweep", ts(1)).unwrap().is_empty(), "a look-alike prefix is not the connector");
-    let closed = ledger.close_on_capabilities(&["microsoft-intune.search-devices".to_owned()], "connection", ts(2)).unwrap();
-    assert_eq!(closed, vec![(id.clone(), "capability:microsoft-intune.*".to_owned())]);
+    assert!(
+        ledger
+            .close_on_capabilities(
+                &[
+                    "microsoft-365.get-user".to_owned(),
+                    "microsoft-intune-lite.x".to_owned()
+                ],
+                "sweep",
+                ts(1)
+            )
+            .unwrap()
+            .is_empty(),
+        "a look-alike prefix is not the connector"
+    );
+    let closed = ledger
+        .close_on_capabilities(
+            &["microsoft-intune.search-devices".to_owned()],
+            "connection",
+            ts(2),
+        )
+        .unwrap();
+    assert_eq!(
+        closed,
+        vec![(id.clone(), "capability:microsoft-intune.*".to_owned())]
+    );
     assert!(tool_available("okta.*", &["okta.get-user".to_owned()]));
-    assert!(!tool_available("okta.*", &["okta".to_owned(), "okta2.get".to_owned()]));
+    assert!(!tool_available(
+        "okta.*",
+        &["okta".to_owned(), "okta2.get".to_owned()]
+    ));
 }
 
 #[test]
@@ -1473,11 +1548,15 @@ fn a_claimed_gap_closes_on_the_claiming_runs_verified_verdict_and_reopens_on_any
     let mut ledger = GapLedger::default();
     let id = ledger
         .file_gap(
-            GapSubject::QuestionShape { text: "how do i reset my mfa token".into() },
+            GapSubject::QuestionShape {
+                text: "how do i reset my mfa token".into(),
+            },
             "No source says how an MFA token is reset",
             vec![run_citation("run-1")],
             GapOrigin::AgentDeclared,
-            ClosureCriteria::FailureRateBelow { threshold_millis: 50 },
+            ClosureCriteria::FailureRateBelow {
+                threshold_millis: 50,
+            },
             2,
             0,
             "desk",
@@ -1485,23 +1564,48 @@ fn a_claimed_gap_closes_on_the_claiming_runs_verified_verdict_and_reopens_on_any
         )
         .unwrap();
     // A verified run closes only a claimed gap: unclaimed, there is no answer to verify.
-    let err = ledger.evaluate_closure(&id, &ClosureEvidence::VerifiedRun { run_id: "run-2".into() }, "verdict", ts(1_000)).unwrap_err();
-    assert!(matches!(err, GapError::ClosureUnsatisfied { .. }), "{err:?}");
+    let err = ledger
+        .evaluate_closure(
+            &id,
+            &ClosureEvidence::VerifiedRun {
+                run_id: "run-2".into(),
+            },
+            "verdict",
+            ts(1_000),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(err, GapError::ClosureUnsatisfied { .. }),
+        "{err:?}"
+    );
     assert_eq!(ledger.entry(&id).unwrap().status, GapStatus::Open);
     // The hunter's run claims it: out of the queue, waiting on the verdict.
     ledger.claim(&id, "run:run-2", ts(2_000)).unwrap();
     assert_eq!(ledger.entry(&id).unwrap().status, GapStatus::TrialPending);
     ledger.claim(&id, "run:run-2", ts(2_100)).unwrap();
     // The verifier did not confirm the answer: back to the queue.
-    ledger.release_claim(&id, "verdict:run-2", ts(3_000)).unwrap();
+    ledger
+        .release_claim(&id, "verdict:run-2", ts(3_000))
+        .unwrap();
     assert_eq!(ledger.entry(&id).unwrap().status, GapStatus::Open);
     // Claimed again and verified: closed, the run its resolution.
     ledger.claim(&id, "run:run-3", ts(4_000)).unwrap();
-    ledger.evaluate_closure(&id, &ClosureEvidence::VerifiedRun { run_id: "run-3".into() }, "verdict:run-3", ts(5_000)).unwrap();
+    ledger
+        .evaluate_closure(
+            &id,
+            &ClosureEvidence::VerifiedRun {
+                run_id: "run-3".into(),
+            },
+            "verdict:run-3",
+            ts(5_000),
+        )
+        .unwrap();
     let entry = ledger.entry(&id).unwrap();
     assert_eq!(entry.status, GapStatus::Closed);
     assert_eq!(entry.resolution.as_deref(), Some("run:run-3:verified"));
     // Closed stays closed on another verdict.
-    ledger.release_claim(&id, "verdict:run-4", ts(6_000)).unwrap();
+    ledger
+        .release_claim(&id, "verdict:run-4", ts(6_000))
+        .unwrap();
     assert_eq!(ledger.entry(&id).unwrap().status, GapStatus::Closed);
 }

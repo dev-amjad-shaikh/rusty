@@ -15,9 +15,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use chrono::{DateTime, Utc};
 use rusty_agent_runtime::error::Result as RuntimeResult;
 use rusty_agent_runtime::learn::{
@@ -28,8 +28,8 @@ use rusty_agent_runtime::memory::{
     MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress,
     ValidityWindow,
 };
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 // --------------------------------------------------------------------- //

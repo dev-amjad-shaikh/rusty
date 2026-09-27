@@ -108,7 +108,10 @@ fn rows_of(answer: &Value) -> Vec<Value> {
 /// The field these rows date themselves by, and the newest value of it.
 fn watermark(rows: &[Value]) -> Option<(String, String)> {
     let field = VERSION_FIELDS.iter().find(|f| {
-        rows.iter().any(|row| row.get(**f).is_some_and(|v| !v.is_null() && v.as_str() != Some("")))
+        rows.iter().any(|row| {
+            row.get(**f)
+                .is_some_and(|v| !v.is_null() && v.as_str() != Some(""))
+        })
     })?;
     let newest = rows
         .iter()
@@ -145,7 +148,11 @@ fn group_counts(rows: &[Value]) -> Option<BTreeMap<String, String>> {
                     .map(|f| {
                         let name = f.get("field").and_then(Value::as_str).unwrap_or("");
                         let value = f.get("value").and_then(Value::as_str).unwrap_or("");
-                        if value.is_empty() { format!("{name} (empty)") } else { format!("{name} {value}") }
+                        if value.is_empty() {
+                            format!("{name} (empty)")
+                        } else {
+                            format!("{name} {value}")
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -185,7 +192,12 @@ pub(crate) fn stamp_read(read: &LearnRead, answer: &Value) -> ReadStamp {
 impl ReadStamp {
     /// The read that produced this stamp, so the check re-runs exactly it.
     pub(crate) fn as_read(&self) -> LearnRead {
-        LearnRead { title: self.title.clone(), tool: self.tool.clone(), arguments: self.arguments.clone(), rows: None }
+        LearnRead {
+            title: self.title.clone(),
+            tool: self.tool.clone(),
+            arguments: self.arguments.clone(),
+            rows: None,
+        }
     }
 }
 
@@ -194,8 +206,14 @@ impl ReadStamp {
 pub fn moved_since(then: &[ReadStamp], now: &[ReadStamp]) -> Vec<String> {
     let mut out = Vec::new();
     for fresh in now {
-        let Some(old) = then.iter().find(|s| s.title == fresh.title && s.tool == fresh.tool) else {
-            out.push(format!("{}: a read the reference does not cover", fresh.title));
+        let Some(old) = then
+            .iter()
+            .find(|s| s.title == fresh.title && s.tool == fresh.tool)
+        else {
+            out.push(format!(
+                "{}: a read the reference does not cover",
+                fresh.title
+            ));
             continue;
         };
         if old.digest == fresh.digest {
@@ -206,13 +224,22 @@ pub fn moved_since(then: &[ReadStamp], now: &[ReadStamp]) -> Vec<String> {
         // groups, and the group lines below say it better.
         let grouped = old.groups.is_some() && fresh.groups.is_some();
         if old.records != fresh.records && !grouped {
-            out.push(format!("{}: {} records → {}", fresh.title, old.records, fresh.records));
+            out.push(format!(
+                "{}: {} records → {}",
+                fresh.title, old.records, fresh.records
+            ));
             said = true;
         }
         match (&old.newest, &fresh.newest) {
             (Some(before), Some(after)) if before != after => {
-                let field = fresh.version_field.clone().unwrap_or_else(|| "version".to_owned());
-                out.push(format!("{}: newest {field} {before} → {after}", fresh.title));
+                let field = fresh
+                    .version_field
+                    .clone()
+                    .unwrap_or_else(|| "version".to_owned());
+                out.push(format!(
+                    "{}: newest {field} {before} → {after}",
+                    fresh.title
+                ));
                 said = true;
             }
             _ => {}
@@ -226,7 +253,10 @@ pub fn moved_since(then: &[ReadStamp], now: &[ReadStamp]) -> Vec<String> {
                         said = true;
                     }
                     None => {
-                        out.push(format!("{}: {group} is counted now and was not ({count})", fresh.title));
+                        out.push(format!(
+                            "{}: {group} is counted now and was not ({count})",
+                            fresh.title
+                        ));
                         said = true;
                     }
                     _ => {}
@@ -241,8 +271,14 @@ pub fn moved_since(then: &[ReadStamp], now: &[ReadStamp]) -> Vec<String> {
             out.push(format!("{}: the answer changed", fresh.title));
         }
     }
-    for gone in then.iter().filter(|s| !now.iter().any(|f| f.title == s.title && f.tool == s.tool)) {
-        out.push(format!("{}: the skill no longer declares this read", gone.title));
+    for gone in then
+        .iter()
+        .filter(|s| !now.iter().any(|f| f.title == s.title && f.tool == s.tool))
+    {
+        out.push(format!(
+            "{}: the skill no longer declares this read",
+            gone.title
+        ));
     }
     out
 }
@@ -258,8 +294,14 @@ pub(crate) async fn load(state: &AppState, tenant: &str, skill: &str) -> Option<
 }
 
 pub(crate) async fn keep(state: &AppState, tenant: &str, stamp: &Stamp) {
-    let Ok(value) = serde_json::to_value(stamp) else { return };
-    if let Err(error) = state.server_store.kv_put(&namespace(tenant), &stamp.skill, value).await {
+    let Ok(value) = serde_json::to_value(stamp) else {
+        return;
+    };
+    if let Err(error) = state
+        .server_store
+        .kv_put(&namespace(tenant), &stamp.skill, value)
+        .await
+    {
         tracing::warn!(skill = %stamp.skill, %error, "the freshness stamp was not kept");
     }
 }
@@ -277,7 +319,12 @@ pub fn notice(stamp: &Stamp) -> String {
 
 /// The reference's text as an agent should read it: the notice first when
 /// the last check found it stale.
-pub(crate) async fn as_read(state: &AppState, tenant: &str, skill: &str, text: String) -> (String, bool) {
+pub(crate) async fn as_read(
+    state: &AppState,
+    tenant: &str,
+    skill: &str,
+    text: String,
+) -> (String, bool) {
     match load(state, tenant, skill).await {
         Some(stamp) if stamp.stale => (format!("{}{text}", notice(&stamp)), true),
         _ => (text, false),
@@ -286,16 +333,24 @@ pub(crate) async fn as_read(state: &AppState, tenant: &str, skill: &str, text: S
 
 /// Re-run the skill's declared reads and compare them with the stamp.
 /// Read-only, deterministic, no model.
-pub(crate) async fn check(state: &AppState, tenant: &TenantContext, skill: &str) -> Result<Stamp, String> {
+pub(crate) async fn check(
+    state: &AppState,
+    tenant: &TenantContext,
+    skill: &str,
+) -> Result<Stamp, String> {
     let Some(mut stamp) = load(state, tenant.tenant(), skill).await else {
-        return Err(format!("`{skill}` has learned nothing yet, so there is nothing to check"));
+        return Err(format!(
+            "`{skill}` has learned nothing yet, so there is nothing to check"
+        ));
     };
     // The reads to re-run are the ones the reference was learned from,
     // not whatever the skill declares now: a comparison is only honest
     // between like and like. Learning again is what changes the recipe.
     let reads: Vec<LearnRead> = stamp.reads.iter().map(|s| s.as_read()).collect();
     if reads.is_empty() {
-        return Err(format!("`{skill}` was learned from no reads, so there is nothing to re-read"));
+        return Err(format!(
+            "`{skill}` was learned from no reads, so there is nothing to re-read"
+        ));
     }
     let (_, _, now) = crate::skill_learn::learn(state, skill, &reads).await?;
     let because = moved_since(&stamp.reads, &now);
@@ -304,7 +359,11 @@ pub(crate) async fn check(state: &AppState, tenant: &TenantContext, skill: &str)
     stamp.because = because;
     keep(state, tenant.tenant(), &stamp).await;
     if stamp.stale {
-        tracing::info!(skill, reasons = stamp.because.len(), "a learned reference went stale");
+        tracing::info!(
+            skill,
+            reasons = stamp.because.len(),
+            "a learned reference went stale"
+        );
     }
     Ok(stamp)
 }
@@ -336,7 +395,9 @@ pub(crate) async fn get_freshness(
 ) -> Result<Json<Value>, ApiError> {
     Ok(Json(match load(&state, tenant.tenant(), &name).await {
         Some(stamp) => json!({"learned": true, "freshness": served(&stamp)}),
-        None => json!({"learned": false, "note": "this skill has learned nothing from a system yet"}),
+        None => {
+            json!({"learned": false, "note": "this skill has learned nothing from a system yet"})
+        }
     }))
 }
 
@@ -346,7 +407,9 @@ pub(crate) async fn post_freshness(
     Extension(tenant): Extension<TenantContext>,
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let stamp = check(&state, &tenant, &name).await.map_err(ApiError::unprocessable)?;
+    let stamp = check(&state, &tenant, &name)
+        .await
+        .map_err(ApiError::unprocessable)?;
     Ok(Json(json!({"learned": true, "freshness": served(&stamp)})))
 }
 
@@ -354,7 +417,11 @@ pub(crate) async fn post_freshness(
 /// suites. A skill whose reads cannot run is left as it was, with why.
 pub(crate) async fn check_all(state: &Arc<AppState>, tenant: &TenantContext) -> Vec<Value> {
     let mut out = Vec::new();
-    let Ok(items) = state.server_store.kv_list(&namespace(tenant.tenant())).await else {
+    let Ok(items) = state
+        .server_store
+        .kv_list(&namespace(tenant.tenant()))
+        .await
+    else {
         return out;
     };
     let skills: Vec<String> = items
@@ -364,7 +431,9 @@ pub(crate) async fn check_all(state: &Arc<AppState>, tenant: &TenantContext) -> 
         .collect();
     for skill in skills {
         match check(state, tenant, &skill).await {
-            Ok(stamp) => out.push(json!({"skill": skill, "stale": stamp.stale, "because": stamp.because})),
+            Ok(stamp) => {
+                out.push(json!({"skill": skill, "stale": stamp.stale, "because": stamp.because}))
+            }
             Err(reason) => out.push(json!({"skill": skill, "skipped": reason})),
         }
     }
@@ -396,7 +465,10 @@ mod tests {
         let plain = stamp_read(&read("Plain"), &json!({"result": [{"number": "INC1"}]}));
         assert_eq!(plain.version_field, None);
         assert_eq!(plain.records, 1);
-        assert_eq!(plain.groups, None, "a list of records is not a count by group");
+        assert_eq!(
+            plain.groups, None,
+            "a list of records is not a count by group"
+        );
     }
 
     #[test]
@@ -407,27 +479,43 @@ mod tests {
                 {"groupby_fields": [{"field": "priority", "value": "4"}], "stats": {"count": p4}},
             ]})
         };
-        let then = vec![stamp_read(&read("Open by priority"), &by_priority("4", "2"))];
+        let then = vec![stamp_read(
+            &read("Open by priority"),
+            &by_priority("4", "2"),
+        )];
         assert_eq!(then[0].groups.as_ref().expect("groups")["priority 3"], "4");
         assert!(moved_since(&then, &then).is_empty());
         // One more P3 open: the group and the numbers, not "something changed".
-        let now = vec![stamp_read(&read("Open by priority"), &by_priority("5", "2"))];
-        assert_eq!(moved_since(&then, &now), vec!["Open by priority: priority 3 4 → 5".to_owned()]);
+        let now = vec![stamp_read(
+            &read("Open by priority"),
+            &by_priority("5", "2"),
+        )];
+        assert_eq!(
+            moved_since(&then, &now),
+            vec!["Open by priority: priority 3 4 → 5".to_owned()]
+        );
         // A group that appears, and one that goes.
         let shifted = json!({"result": [{"groupby_fields": [{"field": "priority", "value": "1"}], "stats": {"count": "1"}}]});
         let because = moved_since(&then, &[stamp_read(&read("Open by priority"), &shifted)]);
-        assert_eq!(because, vec![
-            "Open by priority: priority 1 is counted now and was not (1)".to_owned(),
-            "Open by priority: priority 3 is no longer counted".to_owned(),
-            "Open by priority: priority 4 is no longer counted".to_owned(),
-        ]);
+        assert_eq!(
+            because,
+            vec![
+                "Open by priority: priority 1 is counted now and was not (1)".to_owned(),
+                "Open by priority: priority 3 is no longer counted".to_owned(),
+                "Open by priority: priority 4 is no longer counted".to_owned(),
+            ]
+        );
     }
 
     #[test]
     fn the_check_names_what_moved_and_stays_quiet_when_nothing_did() {
-        let before = json!({"result": [{"number": "INC1", "sys_updated_on": "2026-09-01 10:00:00"}]});
+        let before =
+            json!({"result": [{"number": "INC1", "sys_updated_on": "2026-09-01 10:00:00"}]});
         let then = vec![stamp_read(&read("Resolutions"), &before)];
-        assert!(moved_since(&then, &then).is_empty(), "an unmoved system says nothing");
+        assert!(
+            moved_since(&then, &then).is_empty(),
+            "an unmoved system says nothing"
+        );
 
         // A record added, and the watermark with it: both said, in words.
         let after = json!({"result": [
@@ -436,23 +524,33 @@ mod tests {
         ]});
         let now = vec![stamp_read(&read("Resolutions"), &after)];
         let because = moved_since(&then, &now);
-        assert_eq!(because, vec![
-            "Resolutions: 1 records → 2".to_owned(),
-            "Resolutions: newest sys_updated_on 2026-09-01 10:00:00 → 2026-09-11 09:00:00".to_owned(),
-        ]);
+        assert_eq!(
+            because,
+            vec![
+                "Resolutions: 1 records → 2".to_owned(),
+                "Resolutions: newest sys_updated_on 2026-09-01 10:00:00 → 2026-09-11 09:00:00"
+                    .to_owned(),
+            ]
+        );
 
         // A record edited in place: the count and the watermark both hold,
         // and the digest is what catches it.
         let edited = json!({"result": [{"number": "INC1", "sys_updated_on": "2026-09-01 10:00:00", "state": "Closed"}]});
-        assert_eq!(moved_since(&then, &[stamp_read(&read("Resolutions"), &edited)]), vec!["Resolutions: the answer changed".to_owned()]);
+        assert_eq!(
+            moved_since(&then, &[stamp_read(&read("Resolutions"), &edited)]),
+            vec!["Resolutions: the answer changed".to_owned()]
+        );
 
         // Reads that came and went are named too.
         let other = vec![stamp_read(&read("Catalog"), &before)];
         let both = moved_since(&then, &other);
-        assert_eq!(both, vec![
-            "Catalog: a read the reference does not cover".to_owned(),
-            "Resolutions: the skill no longer declares this read".to_owned(),
-        ]);
+        assert_eq!(
+            both,
+            vec![
+                "Catalog: a read the reference does not cover".to_owned(),
+                "Resolutions: the skill no longer declares this read".to_owned(),
+            ]
+        );
     }
 
     #[test]

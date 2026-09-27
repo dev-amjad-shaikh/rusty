@@ -55,9 +55,9 @@ pub(crate) fn run_taint(run_id: &str) -> Option<String> {
 use async_trait::async_trait;
 use chrono::Utc;
 use rusty_agent_runtime::connector::ConnectorManifest;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::auth::{DEFAULT_TENANT, TenantContext, scope_id};
+use crate::auth::{scope_id, TenantContext, DEFAULT_TENANT};
 use crate::routes::AppState;
 use rusty_agent_runtime::context::SkillSectionEntry;
 use rusty_agent_runtime::error::{Result, RustyError};
@@ -4044,7 +4044,11 @@ impl Tool for TasksEnqueue {
         crate::tasks::validate_pool(&pool).map_err(tool_err)?;
         let kind = {
             let k = text(&args, "kind");
-            if k.is_empty() { "ask".to_owned() } else { k }
+            if k.is_empty() {
+                "ask".to_owned()
+            } else {
+                k
+            }
         };
         // The chain budget: the task or assignment this run works on, when
         // it works one, carries the depth its own run was started at.
@@ -6393,22 +6397,18 @@ mod charter_warning_tests {
         );
         assert_eq!(vague.len(), 1);
         assert!(vague[0].contains("takes a table"));
-        assert!(
-            charter_warnings(
-                &caps,
-                &tools,
-                "Call servicenow.list-records on table ts_query with sysparm_query …"
-            )
-            .is_empty()
-        );
-        assert!(
-            charter_warnings(
-                &caps,
-                &tools,
-                "Read the table: interaction, then the table `sys_db_object`."
-            )
-            .is_empty()
-        );
+        assert!(charter_warnings(
+            &caps,
+            &tools,
+            "Call servicenow.list-records on table ts_query with sysparm_query …"
+        )
+        .is_empty());
+        assert!(charter_warnings(
+            &caps,
+            &tools,
+            "Read the table: interaction, then the table `sys_db_object`."
+        )
+        .is_empty());
         assert!(charter_warnings(&caps, &["echo".to_owned()], "Say hello.").is_empty());
         assert!(!names_a_table("the table data from the API"));
         assert!(names_a_table("object Opportunity"));
@@ -6436,7 +6436,7 @@ mod charter_warning_tests {
 
 #[cfg(test)]
 mod extend_tests {
-    use super::{ExtendOp, ExtendParam, extended_manifest};
+    use super::{extended_manifest, ExtendOp, ExtendParam};
     use rusty_agent_runtime::connector::ConnectorManifest;
     use serde_json::json;
 
@@ -6507,11 +6507,9 @@ mod extend_tests {
             effect: "read_only".to_owned(),
             params: vec![],
         }];
-        assert!(
-            extended_manifest(&pack(), &["3".to_owned()], &dup)
-                .unwrap_err()
-                .contains("exists already")
-        );
+        assert!(extended_manifest(&pack(), &["3".to_owned()], &dup)
+            .unwrap_err()
+            .contains("exists already"));
         let off = vec![ExtendOp {
             name: "elsewhere".to_owned(),
             description: "off root".to_owned(),
@@ -6520,16 +6518,12 @@ mod extend_tests {
             effect: "read_only".to_owned(),
             params: vec![],
         }];
-        assert!(
-            extended_manifest(&pack(), &["3".to_owned()], &off)
-                .unwrap_err()
-                .contains("must start with")
-        );
-        assert!(
-            extended_manifest(&pack(), &["3".to_owned()], &[])
-                .unwrap_err()
-                .contains("at least one")
-        );
+        assert!(extended_manifest(&pack(), &["3".to_owned()], &off)
+            .unwrap_err()
+            .contains("must start with"));
+        assert!(extended_manifest(&pack(), &["3".to_owned()], &[])
+            .unwrap_err()
+            .contains("at least one"));
     }
 }
 

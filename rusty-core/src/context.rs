@@ -126,13 +126,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::error::{Result, RustyError};
 use crate::llm::{ChatMessage, ChatModel, ChatResponse, TokenChunk};
 use crate::memory::{
-    BudgetOverflow, ContextBudget, JournaledMemory, MemoryQuery, MemoryRecord,
-    TOKEN_BYTES_PER_ESTIMATE, estimated_tokens,
+    estimated_tokens, BudgetOverflow, ContextBudget, JournaledMemory, MemoryQuery, MemoryRecord,
+    TOKEN_BYTES_PER_ESTIMATE,
 };
 use crate::record::{Effect, PayloadRef};
 use crate::tool_select::{
@@ -3073,8 +3073,8 @@ impl ChatModel for AssemblingChatModel {
 mod untrusted_line_tests {
     use super::memory_line;
     use crate::memory::{
-        MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ORIGIN_UNTRUSTED_TAG,
-        ProvenanceAuthor, ScopeAddress, ValidityWindow,
+        MemoryKind, MemoryProvenance, MemoryRecord, MemoryScope, ProvenanceAuthor, ScopeAddress,
+        ValidityWindow, ORIGIN_UNTRUSTED_TAG,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -3152,10 +3152,8 @@ mod short_schema_tests {
                 .unwrap(),
             "The table's name, e.g. incident."
         );
-        assert!(
-            short
-                .pointer("/function/parameters/properties/state/examples")
-                .is_none()
-        );
+        assert!(short
+            .pointer("/function/parameters/properties/state/examples")
+            .is_none());
     }
 }

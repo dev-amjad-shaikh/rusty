@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use rusty_agent_runtime::llm::{ChatMessage, Role};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::auth::TenantContext;
 use crate::routes::AppState;

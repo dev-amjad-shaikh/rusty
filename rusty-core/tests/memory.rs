@@ -1285,10 +1285,16 @@ fn memory_forget_effect_key_is_the_derived_form() {
 
 mod recall_score_tests {
     use super::*;
-    use rusty_agent_runtime::memory::{recall_score, trigger_hit, MemoryProvenance, ProvenanceAuthor};
+    use rusty_agent_runtime::memory::{
+        recall_score, trigger_hit, MemoryProvenance, ProvenanceAuthor,
+    };
 
     fn provenance() -> MemoryProvenance {
-        MemoryProvenance { author: ProvenanceAuthor::System, evidence: Default::default(), written_at: ts(1_750_000_000_000) }
+        MemoryProvenance {
+            author: ProvenanceAuthor::System,
+            evidence: Default::default(),
+            written_at: ts(1_750_000_000_000),
+        }
     }
 
     fn note(text: &str, priority: i64, created: DateTime<Utc>) -> MemoryRecord {
@@ -1318,7 +1324,10 @@ mod recall_score_tests {
         let n = note("device is a ThinkPad X1", 5, now).with_tags(["trigger:thinkpad"]);
         assert!(trigger_hit(&n, "is my ThinkPad enrolled?"));
         let full = recall_score(&n, "is my ThinkPad enrolled?", now);
-        assert!((full - 0.75).abs() < 1e-9, "priority 5 → 0.5 + 5/20 = 0.75 at age zero: {full}");
+        assert!(
+            (full - 0.75).abs() < 1e-9,
+            "priority 5 → 0.5 + 5/20 = 0.75 at age zero: {full}"
+        );
     }
 
     #[test]
@@ -1326,7 +1335,11 @@ mod recall_score_tests {
         let now = ts(1_750_000_000_000);
         let fresh = note("vpn certificate reset steps", 10, now);
         let plain = note("vpn certificate reset steps", 0, now);
-        let month = note("vpn certificate reset steps", 10, now - chrono::Duration::days(30));
+        let month = note(
+            "vpn certificate reset steps",
+            10,
+            now - chrono::Duration::days(30),
+        );
         let q = "how do I reset the vpn certificate";
         assert!(recall_score(&fresh, q, now) > recall_score(&plain, q, now));
         let f = recall_score(&fresh, q, now);

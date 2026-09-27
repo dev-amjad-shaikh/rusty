@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{EvalError, Result};
-use crate::trace::{AttributeValue, SPAN_NAMES, SpanTree, TraceSpan};
+use crate::trace::{AttributeValue, SpanTree, TraceSpan, SPAN_NAMES};
 
 /// The versioned attribute vocabulary's version. Bumping it is a
 /// contract change; suites pin against it.

@@ -1,10 +1,10 @@
 //! HTTP error type: a status code plus a JSON `{error, message}` body.
 
-use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The reason a request was refused admission.
 ///
@@ -56,7 +56,11 @@ impl ApiError {
     /// The error's message, as the body carries it — for a tool that
     /// relays a refusal to the model rather than failing the call.
     pub(crate) fn message(&self) -> String {
-        self.body.get("message").and_then(serde_json::Value::as_str).unwrap_or("refused").to_owned()
+        self.body
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("refused")
+            .to_owned()
     }
 
     pub fn not_found(message: String) -> Self {

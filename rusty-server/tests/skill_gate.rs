@@ -27,14 +27,23 @@ struct Obedient;
 #[async_trait::async_trait]
 impl ChatModel for Obedient {
     async fn chat(&self, messages: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        let system = messages.iter().filter(|m| m.role == Role::System).filter_map(|m| m.content.clone()).collect::<Vec<_>>().join("\n");
+        let system = messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .filter_map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         let looked = messages.iter().any(|m| m.role == Role::Tool);
         let message = if system.contains("LOOKUP FIRST") && !looked {
             ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "lookup", json!({}))])
         } else {
             ChatMessage::assistant("there are 168")
         };
-        Ok(ChatResponse { message, model: Some("obedient".into()), usage: None })
+        Ok(ChatResponse {
+            message,
+            model: Some("obedient".into()),
+            usage: None,
+        })
     }
 }
 
@@ -64,7 +73,9 @@ fn app_at(store: &std::path::Path) -> Router {
     let graph = create_react_agent(Arc::new(Obedient), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
     // Under a context policy: the skills an agent follows are assembled into
     // every model call (without one the react node reads no skills section).
     let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf())
@@ -81,10 +92,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn skill_md(body: &str) -> String {
@@ -92,15 +110,30 @@ fn skill_md(body: &str) -> String {
 }
 
 async fn register(app: &Router, body: &str) -> Value {
-    let (status, r) = call(app, "POST", "/skills", Some(json!({"skill_md": skill_md(body)}))).await;
+    let (status, r) = call(
+        app,
+        "POST",
+        "/skills",
+        Some(json!({"skill_md": skill_md(body)})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{r}");
     r
 }
 
 async fn finished(app: &Router, evaluation_id: &str) -> Value {
     for _ in 0..400 {
-        let (_, list) = call(app, "GET", "/datasets/desk-counts/versions/1/evaluations", None).await;
-        if let Some(done) = list["evaluations"].as_array().and_then(|e| e.iter().find(|x| x["evaluation_id"] == evaluation_id && x["status"] != "running")) {
+        let (_, list) = call(
+            app,
+            "GET",
+            "/datasets/desk-counts/versions/1/evaluations",
+            None,
+        )
+        .await;
+        if let Some(done) = list["evaluations"].as_array().and_then(|e| {
+            e.iter()
+                .find(|x| x["evaluation_id"] == evaluation_id && x["status"] != "running")
+        }) {
             return done.clone();
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -110,14 +143,21 @@ async fn finished(app: &Router, evaluation_id: &str) -> Value {
 
 /// The followers' own evaluation — no pin — shows which revision they run.
 async fn followers_run(app: &Router) -> Value {
-    let (status, started) = call(app, "POST", "/datasets/desk-counts/versions/1/evaluations", Some(json!({"assistant_id": "desk"}))).await;
+    let (status, started) = call(
+        app,
+        "POST",
+        "/datasets/desk-counts/versions/1/evaluations",
+        Some(json!({"assistant_id": "desk"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{started}");
     finished(app, started["evaluation_id"].as_str().unwrap()).await
 }
 
 #[tokio::test]
 async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
-    let store = std::env::temp_dir().join(format!("rusty-server-skill-gate-{}", uuid::Uuid::new_v4()));
+    let store =
+        std::env::temp_dir().join(format!("rusty-server-skill-gate-{}", uuid::Uuid::new_v4()));
     let app = app_at(&store);
 
     // The first revision, before anyone follows it: current at once.
@@ -130,7 +170,13 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     // (a lookup — what the skill says).
     let (status, made) = call(&app, "POST", "/assistants", Some(json!({"assistant_id": "desk", "name": "Desk", "graph": "react_agent", "config": {"instructions": "follow your skills", "studio_intent": {"skills": ["count-well"]}}}))).await;
     assert_eq!(status, StatusCode::CREATED, "{made}");
-    let (_, thread) = call(&app, "POST", "/threads", Some(json!({"graph": "react_agent"}))).await;
+    let (_, thread) = call(
+        &app,
+        "POST",
+        "/threads",
+        Some(json!({"graph": "react_agent"})),
+    )
+    .await;
     let thread_id = thread["thread_id"].as_str().unwrap().to_owned();
     let (status, run) = call(&app, "POST", &format!("/threads/{thread_id}/runs/wait"), Some(json!({"input": {"messages": [{"role": "user", "content": "how many?"}]}, "assistant_id": "desk"}))).await;
     assert_eq!(status, StatusCode::OK, "{run}");
@@ -150,33 +196,69 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     // A revision that would break the follower: registered, held — the
     // follower's suite runs against it, pinned; the follower keeps running
     // revision 1 meanwhile.
-    let r = register(&app, "Answer from what you remember; the number is usually 168.").await;
+    let r = register(
+        &app,
+        "Answer from what you remember; the number is usually 168.",
+    )
+    .await;
     assert_eq!(r["revision"], json!(2));
     assert_eq!(r["held"], json!(true), "{r}");
     assert_eq!(r["current"], json!(1));
-    let judged = r["gate"][0]["evaluation_id"].as_str().expect("the gate started the follower's suite").to_owned();
+    let judged = r["gate"][0]["evaluation_id"]
+        .as_str()
+        .expect("the gate started the follower's suite")
+        .to_owned();
     assert_eq!(r["gate"][0]["assistant"], json!("Desk"));
     let (_, receipt) = call(&app, "GET", "/skills/count-well", None).await;
     assert_eq!(receipt["current"], json!(1), "{receipt}");
     assert_eq!(receipt["latest"], json!(2));
     assert_eq!(receipt["candidate"], json!(2));
     let done = finished(&app, &judged).await;
-    assert_eq!(done["passed"], json!(0), "the candidate fails the follower's suite: {done}");
-    assert_eq!(done["dependencies"]["skills"]["count-well"], json!(2), "the evaluation ran pinned to the candidate: {done}");
+    assert_eq!(
+        done["passed"],
+        json!(0),
+        "the candidate fails the follower's suite: {done}"
+    );
+    assert_eq!(
+        done["dependencies"]["skills"]["count-well"],
+        json!(2),
+        "the evaluation ran pinned to the candidate: {done}"
+    );
     let plain = followers_run(&app).await;
-    assert_eq!(plain["passed"], json!(1), "the follower still runs revision 1: {plain}");
-    assert_eq!(plain["dependencies"]["skills"]["count-well"], json!(1), "{plain}");
+    assert_eq!(
+        plain["passed"],
+        json!(1),
+        "the follower still runs revision 1: {plain}"
+    );
+    assert_eq!(
+        plain["dependencies"]["skills"]["count-well"],
+        json!(1),
+        "{plain}"
+    );
 
     // The gate refuses the candidate, and says which follower failed.
     let (status, refused) = call(&app, "POST", "/skills/count-well/promote", Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], json!("evidence_required"));
-    assert_eq!(refused["evidence"]["suites"][0]["state"], json!("failed"), "{refused}");
-    assert!(refused["message"].as_str().unwrap().contains("Desk on desk-counts (failed)"), "{refused}");
+    assert_eq!(
+        refused["evidence"]["suites"][0]["state"],
+        json!("failed"),
+        "{refused}"
+    );
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("Desk on desk-counts (failed)"),
+        "{refused}"
+    );
     // And why: the case, and the reason in words.
     let why = &refused["evidence"]["suites"][0]["failures"][0];
     assert!(why["case_id"].is_string(), "{refused}");
-    assert!(why["said"].as_str().is_some_and(|w| !w.is_empty()), "the gate says why: {refused}");
+    assert!(
+        why["said"].as_str().is_some_and(|w| !w.is_empty()),
+        "the gate says why: {refused}"
+    );
     let (_, evidence) = call(&app, "GET", "/skills/count-well/evidence", None).await;
     assert_eq!(evidence["current"], json!(1));
     assert_eq!(evidence["evidence"]["revision"], json!(2));
@@ -187,12 +269,17 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     let r = register(&app, "LOOKUP FIRST — and say the number plainly.").await;
     assert_eq!(r["revision"], json!(3));
     assert_eq!(r["held"], json!(true));
-    assert_eq!(r["current"], json!(1), "the current revision stays while the candidate is judged: {r}");
+    assert_eq!(
+        r["current"],
+        json!(1),
+        "the current revision stays while the candidate is judged: {r}"
+    );
     let done = finished(&app, r["gate"][0]["evaluation_id"].as_str().unwrap()).await;
     assert_eq!(done["passed"], json!(1), "{done}");
     let (_, evidence) = call(&app, "GET", "/skills/count-well/evidence?revision=3", None).await;
     assert_eq!(evidence["evidence"]["ok"], json!(true), "{evidence}");
-    let (status, promoted) = call(&app, "POST", "/skills/count-well/promote", Some(json!({}))).await;
+    let (status, promoted) =
+        call(&app, "POST", "/skills/count-well/promote", Some(json!({}))).await;
     assert_eq!(status, StatusCode::OK, "{promoted}");
     assert_eq!(promoted["promoted"], json!(true));
     assert_eq!(promoted["current"], json!(3));
@@ -203,7 +290,11 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     // The current revision survives a restart.
     let app = app_at(&store);
     let (_, receipt) = call(&app, "GET", "/skills/count-well", None).await;
-    assert_eq!(receipt["current"], json!(3), "the promotion is kept: {receipt}");
+    assert_eq!(
+        receipt["current"],
+        json!(3),
+        "the promotion is kept: {receipt}"
+    );
     assert_eq!(receipt["latest"], json!(3));
 
     // A failing revision past the gate only on an admin's word, kept with
@@ -214,7 +305,13 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     assert_eq!(r["current"], json!(3));
     let done = finished(&app, r["gate"][0]["evaluation_id"].as_str().unwrap()).await;
     assert_eq!(done["passed"], json!(0), "{done}");
-    let (status, refused) = call(&app, "POST", "/skills/count-well/promote", Some(json!({"revision": 4}))).await;
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/skills/count-well/promote",
+        Some(json!({"revision": 4})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     let (status, forced) = call(&app, "POST", "/skills/count-well/promote", Some(json!({"revision": 4, "override_reason": "the lookup is down this week; answering from memory is what the desk needs"}))).await;
     assert_eq!(status, StatusCode::OK, "{forced}");
@@ -223,11 +320,29 @@ async fn a_skill_revision_reaches_its_followers_only_through_the_gate() {
     assert_eq!(evidence["current"], json!(4));
     let promotion = &evidence["promotions"][0];
     assert_eq!(promotion["revision"], json!(4));
-    assert!(promotion["override_reason"].as_str().unwrap().contains("lookup is down"), "{evidence}");
-    assert_eq!(promotion["evidence"]["ok"], json!(false), "the override is kept with the evidence it overrode");
+    assert!(
+        promotion["override_reason"]
+            .as_str()
+            .unwrap()
+            .contains("lookup is down"),
+        "{evidence}"
+    );
+    assert_eq!(
+        promotion["evidence"]["ok"],
+        json!(false),
+        "the override is kept with the evidence it overrode"
+    );
     let plain = followers_run(&app).await;
-    assert_eq!(plain["passed"], json!(0), "the follower runs revision 4 now: {plain}");
-    assert_eq!(plain["dependencies"]["skills"]["count-well"], json!(4), "{plain}");
+    assert_eq!(
+        plain["passed"],
+        json!(0),
+        "the follower runs revision 4 now: {plain}"
+    );
+    assert_eq!(
+        plain["dependencies"]["skills"]["count-well"],
+        json!(4),
+        "{plain}"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }

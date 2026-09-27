@@ -26,7 +26,9 @@ use rusty_agent_runtime::executor::{ExecutionOutcome, Executor, RunConfig};
 use rusty_agent_runtime::journal::{Clock, Journal, JournalSnapshot, RngSource};
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, Role, ToolCall};
 use rusty_agent_runtime::memory::ContextBudget;
-use rusty_agent_runtime::react::{create_react_agent, create_react_agent_replaying, AGENT_NODE, MESSAGES_CHANNEL};
+use rusty_agent_runtime::react::{
+    create_react_agent, create_react_agent_replaying, AGENT_NODE, MESSAGES_CHANNEL,
+};
 use rusty_agent_runtime::record::{Effect, PayloadRef, RunEvent, RunEventKind};
 use rusty_agent_runtime::replay::{ExactReplay, ReplayParams};
 use rusty_agent_runtime::state::{Reducer, State, StateSpec};
@@ -96,7 +98,10 @@ type SeenCall = (Vec<ChatMessage>, Vec<Value>);
 #[async_trait::async_trait]
 impl ChatModel for ScriptedModel {
     async fn chat(&self, messages: &[ChatMessage], tools: &[Value]) -> RustyResult<ChatResponse> {
-        self.seen.lock().unwrap().push((messages.to_vec(), tools.to_vec()));
+        self.seen
+            .lock()
+            .unwrap()
+            .push((messages.to_vec(), tools.to_vec()));
         let message = self
             .script
             .lock()
@@ -226,24 +231,37 @@ async fn the_charter_is_pinned_the_history_compacts_and_the_journal_holds_the_as
     assert_eq!(first[0].role, Role::System);
     assert_eq!(first[0].content.as_deref(), Some(CHARTER));
     assert_eq!(
-        system_texts(first).iter().filter(|t| t.as_str() == CHARTER).count(),
+        system_texts(first)
+            .iter()
+            .filter(|t| t.as_str() == CHARTER)
+            .count(),
         1,
         "the charter must not appear in both the identity and the history"
     );
     assert!(
-        first.iter().any(|m| m.name.as_deref() == Some(MANIFEST_MESSAGE_NAME)),
+        first
+            .iter()
+            .any(|m| m.name.as_deref() == Some(MANIFEST_MESSAGE_NAME)),
         "the assembled request carries the section manifest"
     );
-    assert!(first.iter().any(|m| m.content.as_deref() == Some("say hello")));
+    assert!(first
+        .iter()
+        .any(|m| m.content.as_deref() == Some("say hello")));
     assert_eq!(first_tools.len(), 1);
 
     // Call 2 is the summarizer: it sees the history after the charter and
     // never the charter itself.
     let (summarize, _) = &seen[1];
-    assert_eq!(summarize[0].content.as_deref(), Some("Summarize the earlier conversation."));
+    assert_eq!(
+        summarize[0].content.as_deref(),
+        Some("Summarize the earlier conversation.")
+    );
     let rendered = summarize[1].content.clone().unwrap_or_default();
     assert!(rendered.contains("say hello"), "{rendered}");
-    assert!(!rendered.contains("CHARTER"), "the charter reached the summarizer: {rendered}");
+    assert!(
+        !rendered.contains("CHARTER"),
+        "the charter reached the summarizer: {rendered}"
+    );
 
     // Call 3: the charter still leads; the older history is the marked
     // summary; the two most recent messages are verbatim.
@@ -251,11 +269,25 @@ async fn the_charter_is_pinned_the_history_compacts_and_the_journal_holds_the_as
     assert_eq!(third[0].content.as_deref(), Some(CHARTER));
     let summary = third
         .iter()
-        .find(|m| m.content.as_deref().is_some_and(|c| c.starts_with(SUMMARY_MARKER)))
+        .find(|m| {
+            m.content
+                .as_deref()
+                .is_some_and(|c| c.starts_with(SUMMARY_MARKER))
+        })
         .expect("a generated summary replaced the oldest history");
-    assert!(summary.content.as_deref().unwrap().contains("echo was called"));
-    assert!(third.iter().any(|m| !m.tool_calls.is_empty()), "the tool call stayed verbatim");
-    assert!(third.iter().any(|m| m.role == Role::Tool), "the tool result stayed verbatim");
+    assert!(summary
+        .content
+        .as_deref()
+        .unwrap()
+        .contains("echo was called"));
+    assert!(
+        third.iter().any(|m| !m.tool_calls.is_empty()),
+        "the tool call stayed verbatim"
+    );
+    assert!(
+        third.iter().any(|m| m.role == Role::Tool),
+        "the tool result stayed verbatim"
+    );
 
     // The journal: three model calls — two under the agent's node inputs,
     // one under the pipeline's parent — and the agent's journaled request is
@@ -265,7 +297,12 @@ async fn the_charter_is_pinned_the_history_compacts_and_the_journal_holds_the_as
         .iter()
         .filter(|e| e.kind == RunEventKind::ModelCall)
         .collect();
-    assert_eq!(model_calls.len(), 3, "{:?}", model_calls.iter().map(|e| &e.parent).collect::<Vec<_>>());
+    assert_eq!(
+        model_calls.len(),
+        3,
+        "{:?}",
+        model_calls.iter().map(|e| &e.parent).collect::<Vec<_>>()
+    );
     let agent_calls: Vec<&&RunEvent> = model_calls
         .iter()
         .filter(|e| e.node_id.as_deref() == Some(AGENT_NODE))
@@ -278,7 +315,10 @@ async fn the_charter_is_pinned_the_history_compacts_and_the_journal_holds_the_as
         .iter()
         .filter_map(|m| m.get("name").and_then(Value::as_str))
         .collect();
-    assert!(names.contains(&MANIFEST_MESSAGE_NAME), "journaled request is the assembled one: {names:?}");
+    assert!(
+        names.contains(&MANIFEST_MESSAGE_NAME),
+        "journaled request is the assembled one: {names:?}"
+    );
     let compaction = model_calls
         .iter()
         .find(|e| e.parent.as_deref() == Some(CONTEXT_PIPELINE_PARENT))
@@ -293,7 +333,10 @@ async fn the_charter_is_pinned_the_history_compacts_and_the_journal_holds_the_as
     assert_eq!(messages[0].content.as_deref(), Some(CHARTER));
     assert_eq!(messages.len(), 5);
     assert_eq!(messages[4].content.as_deref(), Some("the echo said: hello"));
-    assert!(!messages.iter().any(|m| m.content.as_deref().is_some_and(|c| c.starts_with(SUMMARY_MARKER))));
+    assert!(!messages.iter().any(|m| m
+        .content
+        .as_deref()
+        .is_some_and(|c| c.starts_with(SUMMARY_MARKER))));
 }
 
 #[tokio::test]
@@ -407,7 +450,10 @@ async fn the_builders_when_to_use_note_reaches_the_schema_and_the_ranking_is_jou
         .to_owned();
     assert!(manifest_text.contains("shortlist"), "{manifest_text}");
     assert!(manifest_text.contains("\"selected\""), "{manifest_text}");
-    assert!(manifest_text.contains("\"name\":\"echo\""), "{manifest_text}");
+    assert!(
+        manifest_text.contains("\"name\":\"echo\""),
+        "{manifest_text}"
+    );
 
     // The declaration carries the overlays, so a replay re-declares them.
     let declared = snapshot
@@ -434,7 +480,8 @@ async fn a_governed_recording_replays_exactly_without_a_model() {
     let model: Arc<dyn ChatModel> = Arc::new(PanicModel {
         calls: Arc::clone(&model_calls),
     });
-    let graph = create_react_agent_replaying(model, tools(None), replay.source(), journal.clone()).unwrap();
+    let graph =
+        create_react_agent_replaying(model, tools(None), replay.source(), journal.clone()).unwrap();
     let params = ReplayParams::new(journal, RngSource::seeded(RNG_SEED))
         .with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
     let replayed = replay

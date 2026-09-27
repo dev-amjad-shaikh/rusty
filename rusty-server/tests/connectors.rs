@@ -384,17 +384,32 @@ async fn a_connection_follows_its_connector_only_when_the_new_version_answers() 
     // The version it already runs is not a move.
     let (status, err) = upgrade(v1.clone()).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{err}");
-    assert!(err["message"].as_str().unwrap().contains("already runs"), "{err}");
+    assert!(
+        err["message"].as_str().unwrap().contains("already runs"),
+        "{err}"
+    );
 
     // Another connector is not a version of this one.
     let mut other = demo_manifest();
     other.id = "other-system".to_owned();
     other.hash = String::new();
-    let (status, receipt) = call(&app, "POST", "/connectors", Some(serde_json::to_value(&other).unwrap())).await;
+    let (status, receipt) = call(
+        &app,
+        "POST",
+        "/connectors",
+        Some(serde_json::to_value(&other).unwrap()),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{receipt}");
     let (status, err) = upgrade(receipt["hash"].as_str().unwrap().to_owned()).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{err}");
-    assert!(err["message"].as_str().unwrap().contains("not another version"), "{err}");
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .contains("not another version"),
+        "{err}"
+    );
 
     // Version 2 of the same connector: the move happens only if the system
     // answers its check — here the host does not resolve, so it does not,
@@ -402,14 +417,26 @@ async fn a_connection_follows_its_connector_only_when_the_new_version_answers() 
     let mut v2 = demo_manifest();
     v2.version = "2".to_owned();
     v2.hash = String::new();
-    let (status, receipt) = call(&app, "POST", "/connectors", Some(serde_json::to_value(&v2).unwrap())).await;
+    let (status, receipt) = call(
+        &app,
+        "POST",
+        "/connectors",
+        Some(serde_json::to_value(&v2).unwrap()),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{receipt}");
     let v2_hash = receipt["hash"].as_str().unwrap().to_owned();
     assert_ne!(v2_hash, v1);
     let (status, err) = upgrade(v2_hash.clone()).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
     assert_eq!(err["error"], "check_failed");
-    assert!(err["message"].as_str().unwrap().contains("stays on version 1"), "{err}");
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .contains("stays on version 1"),
+        "{err}"
+    );
     let (status, list) = call(&app, "GET", "/connectors/instances", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["instances"][0]["manifest_hash"], json!(v1));
@@ -1108,7 +1135,6 @@ async fn egress_preflight_allows_loopback_with_pin() {
     let _ = std::fs::remove_dir_all(store);
 }
 
-
 // --------------------------------------------------------------------- //
 // The credential lifecycle: rotate keeps the connection, revoke ends it
 // --------------------------------------------------------------------- //
@@ -1139,7 +1165,10 @@ async fn rotate_keeps_the_connection_and_revoke_ends_it() {
     assert_eq!(status, StatusCode::OK, "{rotated}");
     assert_eq!(rotated["instance_id"], instance_id);
     assert_eq!(rotated["config"]["instance"], "dev456");
-    assert_eq!(rotated["config"]["credentials"]["password"], json!({"rusty_secret": true}));
+    assert_eq!(
+        rotated["config"]["credentials"]["password"],
+        json!({"rusty_secret": true})
+    );
 
     // A shape the connector does not declare is refused, and nothing changed.
     let (status, _) = call(
@@ -1154,14 +1183,32 @@ async fn rotate_keeps_the_connection_and_revoke_ends_it() {
     assert_eq!(listed["instances"][0]["config"]["instance"], "dev456");
 
     // Revoke: the record and its tools are gone; the id answers 404 after.
-    let (status, _) = call(&app, "DELETE", &format!("/connectors/instances/{instance_id}"), None).await;
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        &format!("/connectors/instances/{instance_id}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = call(&app, "GET", &format!("/connectors/instances/{instance_id}/catalog"), None).await;
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/connectors/instances/{instance_id}/catalog"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (_, listed) = call(&app, "GET", "/connectors/instances", None).await;
     assert_eq!(listed["instances"].as_array().unwrap().len(), 0);
     // Twice is not an error for the store, but the door says it is gone.
-    let (status, _) = call(&app, "DELETE", &format!("/connectors/instances/{instance_id}"), None).await;
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        &format!("/connectors/instances/{instance_id}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let _ = std::fs::remove_dir_all(store);

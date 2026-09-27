@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::effects::{EffectAdmissionContext, EffectRequest};
 use crate::error::{Result, RustyError};
@@ -848,7 +848,11 @@ impl ToolExecutor {
     /// approval, each with the effect id a token must be minted against —
     /// asked before any call runs, so a run can pause and ask a person
     /// instead of letting the model watch its own call fail.
-    pub fn approvals_needed(&self, gate: &EffectAdmissionContext, calls: &[ToolCall]) -> Vec<ApprovalNeeded> {
+    pub fn approvals_needed(
+        &self,
+        gate: &EffectAdmissionContext,
+        calls: &[ToolCall],
+    ) -> Vec<ApprovalNeeded> {
         let context = gate;
         calls
             .iter()
@@ -884,7 +888,9 @@ impl ToolExecutor {
     pub async fn execute_batch(&self, calls: &[ToolCall]) -> Vec<ChatMessage> {
         let futures = calls.iter().map(|call| async move {
             match self.execute_one(call).await {
-                Ok(Value::String(content)) => ChatMessage::tool_result(&call.id, shape_text(&content)),
+                Ok(Value::String(content)) => {
+                    ChatMessage::tool_result(&call.id, shape_text(&content))
+                }
                 Ok(other) => ChatMessage::tool_result(&call.id, shape_result(&other)),
                 Err(error) => ChatMessage::tool_result(&call.id, format!("ERROR: {error}")),
             }
@@ -1121,9 +1127,14 @@ async fn dispatch_tool(
                 .await
                 .and_then(|result| serde_json::to_value(result).map_err(Into::into));
             if let (Some(evidence), Some(started)) = (guard_evidence, started) {
-                let latency_ms = (evidence.journal.clock().now() - started).num_milliseconds().max(0) as u64;
+                let latency_ms = (evidence.journal.clock().now() - started)
+                    .num_milliseconds()
+                    .max(0) as u64;
                 let mut draft = EventDraft::new(RunEventKind::ToolCall, tool.effect())
-                    .input(crate::replay::tool_call_request(&call.name, &call.arguments))
+                    .input(crate::replay::tool_call_request(
+                        &call.name,
+                        &call.arguments,
+                    ))
                     .latency_ms(latency_ms)
                     .parent(evidence.parent.clone());
                 if !node.is_empty() {
@@ -1131,7 +1142,9 @@ async fn dispatch_tool(
                 }
                 draft = match &result {
                     Ok(value) => draft.output(value.clone()),
-                    Err(error) => draft.status(crate::record::EventStatus::Error).output(serde_json::json!({ "error": error.to_string() })),
+                    Err(error) => draft
+                        .status(crate::record::EventStatus::Error)
+                        .output(serde_json::json!({ "error": error.to_string() })),
                 };
                 evidence.journal.record(draft);
             }
@@ -1150,7 +1163,6 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         "<non-string payload>".to_owned()
     }
 }
-
 
 // --------------------------------------------------------------------- //
 // Failures the loop can act on
@@ -1180,8 +1192,23 @@ pub struct ToolFailure {
 impl ToolFailure {
     pub const KIND: &'static str = "tool_failure";
 
-    pub fn new(class: &str, tool: &str, detail: impl Into<String>, sent: bool, retry_safe: bool, next: impl Into<String>) -> Self {
-        Self { kind: Self::KIND.to_owned(), class: class.to_owned(), tool: tool.to_owned(), detail: detail.into(), sent, retry_safe, next: next.into() }
+    pub fn new(
+        class: &str,
+        tool: &str,
+        detail: impl Into<String>,
+        sent: bool,
+        retry_safe: bool,
+        next: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: Self::KIND.to_owned(),
+            class: class.to_owned(),
+            tool: tool.to_owned(),
+            detail: detail.into(),
+            sent,
+            retry_safe,
+            next: next.into(),
+        }
     }
 
     /// The error a tool returns to carry this failure.
@@ -1192,8 +1219,15 @@ impl ToolFailure {
     /// A tool result's content as a failure, when it is one (with or
     /// without the `ERROR: ` prefix the batch executor adds).
     pub fn parse(content: &str) -> Option<Self> {
-        let text = content.trim().strip_prefix("ERROR:").map(str::trim).unwrap_or(content.trim());
-        let text = text.strip_prefix("tool error:").map(str::trim).unwrap_or(text);
+        let text = content
+            .trim()
+            .strip_prefix("ERROR:")
+            .map(str::trim)
+            .unwrap_or(content.trim());
+        let text = text
+            .strip_prefix("tool error:")
+            .map(str::trim)
+            .unwrap_or(text);
         let parsed: Self = serde_json::from_str(text).ok()?;
         (parsed.kind == Self::KIND).then_some(parsed)
     }
@@ -1209,13 +1243,20 @@ pub const FAILURE_BOUND: usize = 2;
 /// (`unknown_outcome`) is refused with `reconcile_first` until a read-only
 /// tool has answered since. Pure on the thread, so record and replay reach
 /// the same verdict. `None` means dispatch.
-pub fn failure_policy(history: &[ChatMessage], call: &ToolCall, registry: &ToolRegistry) -> Option<ToolFailure> {
+pub fn failure_policy(
+    history: &[ChatMessage],
+    call: &ToolCall,
+    registry: &ToolRegistry,
+) -> Option<ToolFailure> {
     let effect_of = |name: &str| registry.get(name).map(|t| t.effect());
     // Pair every tool call in the thread with its result, in order.
     let mut attempts: Vec<(usize, &ToolCall, Option<&str>)> = Vec::new();
     for (i, message) in history.iter().enumerate() {
         for tc in &message.tool_calls {
-            let result = history[i..].iter().find(|m| m.tool_call_id.as_deref() == Some(tc.id.as_str())).and_then(|m| m.content.as_deref());
+            let result = history[i..]
+                .iter()
+                .find(|m| m.tool_call_id.as_deref() == Some(tc.id.as_str()))
+                .and_then(|m| m.content.as_deref());
             attempts.push((i, tc, result));
         }
     }
@@ -1224,9 +1265,13 @@ pub fn failure_policy(history: &[ChatMessage], call: &ToolCall, registry: &ToolR
     // (`bounded`, `reconcile_first`) and the repeat notice are not attempts.
     let real_failure = |content: &str| {
         content.trim_start().starts_with("ERROR:")
-            && !ToolFailure::parse(content).is_some_and(|f| f.class == "bounded" || f.class == "reconcile_first")
+            && !ToolFailure::parse(content)
+                .is_some_and(|f| f.class == "bounded" || f.class == "reconcile_first")
     };
-    let failures = attempts.iter().filter(|(_, tc, r)| identical(tc) && r.is_some_and(real_failure)).count();
+    let failures = attempts
+        .iter()
+        .filter(|(_, tc, r)| identical(tc) && r.is_some_and(real_failure))
+        .count();
     if failures >= FAILURE_BOUND {
         return Some(ToolFailure::new(
             "bounded",
@@ -1237,13 +1282,17 @@ pub fn failure_policy(history: &[ChatMessage], call: &ToolCall, registry: &ToolR
             "change the arguments or the approach, or say what you need — the same call again is not tried",
         ));
     }
-    let writes = !matches!(effect_of(&call.name), Some(Effect::ReadOnly) | Some(Effect::Pure));
+    let writes = !matches!(
+        effect_of(&call.name),
+        Some(Effect::ReadOnly) | Some(Effect::Pure)
+    );
     if writes {
         let uncertain = attempts
             .iter()
             .filter_map(|(i, tc, r)| {
                 let failure = r.and_then(ToolFailure::parse)?;
-                (identical(tc) && failure.class == "unknown_outcome").then_some((*i, failure.retry_safe))
+                (identical(tc) && failure.class == "unknown_outcome")
+                    .then_some((*i, failure.retry_safe))
             })
             .max_by_key(|(i, _)| *i);
         // The tool's own read-back found nothing (`retry_safe`): one re-send
@@ -1257,7 +1306,10 @@ pub fn failure_policy(history: &[ChatMessage], call: &ToolCall, registry: &ToolR
         if let Some((at, false)) = uncertain {
             let read_since = attempts.iter().any(|(i, tc, r)| {
                 *i > at
-                    && matches!(effect_of(&tc.name), Some(Effect::ReadOnly) | Some(Effect::Pure))
+                    && matches!(
+                        effect_of(&tc.name),
+                        Some(Effect::ReadOnly) | Some(Effect::Pure)
+                    )
                     && r.is_some_and(|c| !c.trim_start().starts_with("ERROR:"))
             });
             if !read_since {
@@ -1303,11 +1355,45 @@ pub const TOOL_RESULT_INLINE_BYTES: usize = 24 * 1024;
 /// Fields worth keeping first when an item has more than fit: identifiers,
 /// titles, states, owners, times — the columns a person would put in a table.
 const TELLING_KEYS: &[&str] = &[
-    "number", "id", "key", "name", "title", "subject", "summary", "short_description", "description",
-    "priority", "severity", "urgency", "state", "status", "category", "type", "kind",
-    "assigned_to", "assignment_group", "owner", "requester", "caller_id", "author", "login",
-    "opened_at", "created_at", "created_on", "sys_created_on", "updated_at", "sys_updated_on", "closed_at", "due_date",
-    "url", "html_url", "link", "email", "count", "total", "active",
+    "number",
+    "id",
+    "key",
+    "name",
+    "title",
+    "subject",
+    "summary",
+    "short_description",
+    "description",
+    "priority",
+    "severity",
+    "urgency",
+    "state",
+    "status",
+    "category",
+    "type",
+    "kind",
+    "assigned_to",
+    "assignment_group",
+    "owner",
+    "requester",
+    "caller_id",
+    "author",
+    "login",
+    "opened_at",
+    "created_at",
+    "created_on",
+    "sys_created_on",
+    "updated_at",
+    "sys_updated_on",
+    "closed_at",
+    "due_date",
+    "url",
+    "html_url",
+    "link",
+    "email",
+    "count",
+    "total",
+    "active",
 ];
 const MAX_ITEM_KEYS: usize = 12;
 const MAX_VALUE_CHARS: usize = 160;
@@ -1349,7 +1435,9 @@ pub fn shape_result(value: &Value) -> String {
             // One collection that is most of the bytes is the payload; a
             // small list beside big scalars is just another field.
             match collections.as_slice() {
-                [(key, items)] if Value::Array((*items).clone()).to_string().len() * 2 >= whole.len() => {
+                [(key, items)]
+                    if Value::Array((*items).clone()).to_string().len() * 2 >= whole.len() =>
+                {
                     (Some(items), Some((*key).clone()))
                 }
                 _ => (None, None),
@@ -1405,7 +1493,11 @@ pub fn shape_result(value: &Value) -> String {
             // and not invented from the part shown.
             let tallies = tally(items);
             if !tallies.is_empty() {
-                note.push_str(&format!(" Counts over all {} items — {}.", items.len(), tallies.join(" · ")));
+                note.push_str(&format!(
+                    " Counts over all {} items — {}.",
+                    items.len(),
+                    tallies.join(" · ")
+                ));
             }
             if !keys.is_empty() {
                 note.push_str(&format!(" Every field an item has: {}.", keys.join(", ")));
@@ -1438,10 +1530,16 @@ fn tally(items: &[Value]) -> Vec<String> {
         let mut counts: Vec<(String, usize)> = Vec::new();
         let mut present = 0usize;
         for item in items {
-            let Some(v) = item.as_object().and_then(|o| o.get(*key)) else { continue };
+            let Some(v) = item.as_object().and_then(|o| o.get(*key)) else {
+                continue;
+            };
             present += 1;
             let text = scalar_text(v);
-            let label = if text.trim().is_empty() { "(blank)".to_owned() } else { clip_to(&text, 40) };
+            let label = if text.trim().is_empty() {
+                "(blank)".to_owned()
+            } else {
+                clip_to(&text, 40)
+            };
             match counts.iter_mut().find(|(l, _)| *l == label) {
                 Some((_, n)) => *n += 1,
                 None => counts.push((label, 1)),
@@ -1459,7 +1557,11 @@ fn tally(items: &[Value]) -> Vec<String> {
         counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         out.push(format!(
             "{key}: {}",
-            counts.iter().map(|(l, n)| format!("{l} ×{n}")).collect::<Vec<_>>().join(", ")
+            counts
+                .iter()
+                .map(|(l, n)| format!("{l} ×{n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     out
@@ -1521,7 +1623,9 @@ fn is_blank(v: &Value) -> bool {
         Value::Null => true,
         Value::String(s) => s.trim().is_empty(),
         Value::Array(a) => a.is_empty(),
-        Value::Object(o) => o.is_empty() || (o.contains_key("display_value") && is_blank(&o["display_value"])),
+        Value::Object(o) => {
+            o.is_empty() || (o.contains_key("display_value") && is_blank(&o["display_value"]))
+        }
         _ => false,
     }
 }
@@ -1535,7 +1639,15 @@ fn scalar_text(v: &Value) -> String {
         Value::Bool(_) | Value::Number(_) => v.to_string(),
         Value::Array(a) => format!("[{} items]", a.len()),
         Value::Object(o) => {
-            for key in ["display_value", "name", "title", "value", "href", "url", "id"] {
+            for key in [
+                "display_value",
+                "name",
+                "title",
+                "value",
+                "href",
+                "url",
+                "id",
+            ] {
                 if let Some(inner) = o.get(key) {
                     if !is_blank(inner) && !inner.is_object() && !inner.is_array() {
                         return scalar_text(inner);
@@ -1570,9 +1682,18 @@ mod shaping_tests {
                 }
                 o.insert("number".into(), json!(format!("INC00{i:05}")));
                 o.insert("priority".into(), json!("2"));
-                o.insert("short_description".into(), json!(format!("Printer {i} on fire")));
-                o.insert("assigned_to".into(), json!({"display_value": "Ann", "link": "https://x/ann"}));
-                o.insert("assignment_group".into(), json!({"display_value": "", "link": ""}));
+                o.insert(
+                    "short_description".into(),
+                    json!(format!("Printer {i} on fire")),
+                );
+                o.insert(
+                    "assigned_to".into(),
+                    json!({"display_value": "Ann", "link": "https://x/ann"}),
+                );
+                o.insert(
+                    "assignment_group".into(),
+                    json!({"display_value": "", "link": ""}),
+                );
                 o.insert("opened_at".into(), json!("2026-09-07 04:00:00"));
                 Value::Object(o)
             })
@@ -1591,18 +1712,37 @@ mod shaping_tests {
         let v = incidents(60);
         assert!(v.to_string().len() > TOOL_RESULT_INLINE_BYTES);
         let shaped = shape_result(&v);
-        assert!(shaped.len() <= TOOL_RESULT_INLINE_BYTES + 4096, "shaped is {} bytes", shaped.len());
+        assert!(
+            shaped.len() <= TOOL_RESULT_INLINE_BYTES + 4096,
+            "shaped is {} bytes",
+            shaped.len()
+        );
         assert!(shaped.starts_with("SHAPED RESULT — "));
         assert!(shaped.contains("A list of 60 items under `result`"));
         assert!(shaped.contains("do not conclude the rest is empty"));
-        assert!(shaped.contains("INC0000000"), "the first item's number survives");
+        assert!(
+            shaped.contains("INC0000000"),
+            "the first item's number survives"
+        );
         assert!(shaped.contains("\"priority\":\"2\""));
-        assert!(shaped.contains("\"assigned_to\":\"Ann\""), "a reference reads by its display value");
-        assert!(!shaped.contains("\"assignment_group\":\""), "a blank reference is dropped from the items");
+        assert!(
+            shaped.contains("\"assigned_to\":\"Ann\""),
+            "a reference reads by its display value"
+        );
+        assert!(
+            !shaped.contains("\"assignment_group\":\""),
+            "a blank reference is dropped from the items"
+        );
         assert!(shaped.contains("Every field an item has: "));
-        assert!(shaped.contains("u_field_89"), "every key is listed so the model can ask for it");
+        assert!(
+            shaped.contains("u_field_89"),
+            "every key is listed so the model can ask for it"
+        );
         assert!(shaped.contains("Counts over all 60 items — "), "{shaped}");
-        assert!(shaped.contains("priority: 2 ×60"), "a count over every item, not the shown ones");
+        assert!(
+            shaped.contains("priority: 2 ×60"),
+            "a count over every item, not the shown ones"
+        );
         assert!(shaped.contains("assigned_to: Ann ×60"));
     }
 
@@ -1610,7 +1750,10 @@ mod shaping_tests {
     fn a_large_object_is_its_fields_cut_short() {
         let mut o = serde_json::Map::new();
         o.insert("name".into(), json!("big"));
-        o.insert("blob".into(), json!("y".repeat(TOOL_RESULT_INLINE_BYTES + 10)));
+        o.insert(
+            "blob".into(),
+            json!("y".repeat(TOOL_RESULT_INLINE_BYTES + 10)),
+        );
         o.insert("parts".into(), json!([1, 2, 3]));
         let shaped = shape_result(&Value::Object(o));
         assert!(shaped.starts_with("SHAPED RESULT — "));
@@ -1701,13 +1844,11 @@ mod tests {
         assert_eq!(results[1].tool_call_id.as_deref(), Some("c2"));
         assert!(results[1].content.as_deref().unwrap().starts_with("ERROR:"));
         assert_eq!(results[2].tool_call_id.as_deref(), Some("c3"));
-        assert!(
-            results[2]
-                .content
-                .as_deref()
-                .unwrap()
-                .contains("unknown tool")
-        );
+        assert!(results[2]
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("unknown tool"));
     }
 
     struct Panic;
@@ -1926,28 +2067,49 @@ mod failure_policy_tests {
         ChatMessage::assistant_tool_calls(vec![ToolCall::new(id, name, args)])
     }
     fn failed(id: &str, class: &str) -> ChatMessage {
-        ChatMessage::tool_result(id, format!("ERROR: {}", serde_json::to_string(&ToolFailure::new(class, "post", "x", true, false, "y")).unwrap()))
+        ChatMessage::tool_result(
+            id,
+            format!(
+                "ERROR: {}",
+                serde_json::to_string(&ToolFailure::new(class, "post", "x", true, false, "y"))
+                    .unwrap()
+            ),
+        )
     }
 
     #[test]
     fn the_same_call_that_failed_its_bound_is_refused() {
         let r = registry();
         let call = ToolCall::new("c3", "read", json!({"table": "incdent"}));
-        let mut history = vec![asked("c1", "read", json!({"table": "incdent"})), failed("c1", "invalid_arguments")];
-        assert!(failure_policy(&history, &call, &r).is_none(), "one failure: try again");
+        let mut history = vec![
+            asked("c1", "read", json!({"table": "incdent"})),
+            failed("c1", "invalid_arguments"),
+        ];
+        assert!(
+            failure_policy(&history, &call, &r).is_none(),
+            "one failure: try again"
+        );
         history.push(asked("c2", "read", json!({"table": "incdent"})));
         history.push(failed("c2", "invalid_arguments"));
         let refusal = failure_policy(&history, &call, &r).expect("bounded");
         assert_eq!(refusal.class, "bounded");
         // Different arguments are a different call.
-        assert!(failure_policy(&history, &ToolCall::new("c4", "read", json!({"table": "incident"})), &r).is_none());
+        assert!(failure_policy(
+            &history,
+            &ToolCall::new("c4", "read", json!({"table": "incident"})),
+            &r
+        )
+        .is_none());
     }
 
     #[test]
     fn a_write_whose_answer_was_lost_is_not_sent_again_until_something_was_read() {
         let r = registry();
         let again = ToolCall::new("c2", "post", json!({"text": "hello"}));
-        let mut history = vec![asked("c1", "post", json!({"text": "hello"})), failed("c1", "unknown_outcome")];
+        let mut history = vec![
+            asked("c1", "post", json!({"text": "hello"})),
+            failed("c1", "unknown_outcome"),
+        ];
         let refusal = failure_policy(&history, &again, &r).expect("reconcile first");
         assert_eq!(refusal.class, "reconcile_first");
         // A read that answered clears the way.
@@ -1955,7 +2117,10 @@ mod failure_policy_tests {
         history.push(ChatMessage::tool_result("r1", "{\"posts\": []}"));
         assert!(failure_policy(&history, &again, &r).is_none());
         // A read-only call is never held back by the rule.
-        let mut only_read = vec![asked("c1", "read", json!({})), failed("c1", "unknown_outcome")];
+        let mut only_read = vec![
+            asked("c1", "read", json!({})),
+            failed("c1", "unknown_outcome"),
+        ];
         assert!(failure_policy(&only_read, &ToolCall::new("c9", "read", json!({})), &r).is_none());
         only_read.clear();
     }
@@ -1964,19 +2129,47 @@ mod failure_policy_tests {
     fn after_a_read_back_found_nothing_one_identical_re_send_is_allowed_and_only_one() {
         let r = registry();
         let again = ToolCall::new("c2", "post", json!({"text": "hello"}));
-        let lost_but_checked = |id: &str| ChatMessage::tool_result(id, format!("ERROR: {}", serde_json::to_string(&ToolFailure::new("unknown_outcome", "post", "sent; the read-back found no record", true, true, "send it once more")).unwrap()));
-        let mut history = vec![asked("c1", "post", json!({"text": "hello"})), lost_but_checked("c1")];
-        assert!(failure_policy(&history, &again, &r).is_none(), "the read-back found nothing: one re-send is safe");
+        let lost_but_checked = |id: &str| {
+            ChatMessage::tool_result(
+                id,
+                format!(
+                    "ERROR: {}",
+                    serde_json::to_string(&ToolFailure::new(
+                        "unknown_outcome",
+                        "post",
+                        "sent; the read-back found no record",
+                        true,
+                        true,
+                        "send it once more"
+                    ))
+                    .unwrap()
+                ),
+            )
+        };
+        let mut history = vec![
+            asked("c1", "post", json!({"text": "hello"})),
+            lost_but_checked("c1"),
+        ];
+        assert!(
+            failure_policy(&history, &again, &r).is_none(),
+            "the read-back found nothing: one re-send is safe"
+        );
         // The re-send is made and its answer is lost again: the tool's own
         // read-back runs again; a second identical failure without a
         // read-back is refused as before.
         history.push(asked("c2", "post", json!({"text": "hello"})));
         history.push(failed("c2", "unknown_outcome"));
-        let refusal = failure_policy(&history, &ToolCall::new("c3", "post", json!({"text": "hello"})), &r).expect("refused");
+        let refusal = failure_policy(
+            &history,
+            &ToolCall::new("c3", "post", json!({"text": "hello"})),
+            &r,
+        )
+        .expect("refused");
         // Two real failures of one call are also the bound; either way the
         // third identical write is not sent.
-        assert!(matches!(refusal.class.as_str(), "reconcile_first" | "bounded"), "{refusal:?}");
+        assert!(
+            matches!(refusal.class.as_str(), "reconcile_first" | "bounded"),
+            "{refusal:?}"
+        );
     }
-
 }
-

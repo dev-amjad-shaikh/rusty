@@ -266,11 +266,23 @@ async fn max_steps_guard_aborts_cyclic_graph() {
         .await;
     match outcome {
         Ok(ExecutionOutcome::Interrupted { value, state, .. }) => {
-            assert_eq!(value["rusty.halted"]["reason"], json!("step_ceiling"), "{value}");
+            assert_eq!(
+                value["rusty.halted"]["reason"],
+                json!("step_ceiling"),
+                "{value}"
+            );
             assert_eq!(value["rusty.halted"]["steps_run"], json!(5), "{value}");
             assert_eq!(value["rusty.halted"]["limit"], json!(5), "{value}");
-            let trace = state.get_as::<Value>("trace").ok().flatten().unwrap_or(json!([]));
-            assert_eq!(trace.as_array().map(|t| t.len()), Some(5), "five steps ran before the ceiling: {trace}");
+            let trace = state
+                .get_as::<Value>("trace")
+                .ok()
+                .flatten()
+                .unwrap_or(json!([]));
+            assert_eq!(
+                trace.as_array().map(|t| t.len()),
+                Some(5),
+                "five steps ran before the ceiling: {trace}"
+            );
         }
         other => panic!("the cyclic graph must halt at the step ceiling, got {other:?}"),
     }

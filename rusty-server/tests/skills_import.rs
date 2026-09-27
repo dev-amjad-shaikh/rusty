@@ -13,7 +13,10 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 fn temp_store() -> PathBuf {
-    std::env::temp_dir().join(format!("rusty-server-skills-import-{}", uuid::Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "rusty-server-skills-import-{}",
+        uuid::Uuid::new_v4()
+    ))
 }
 
 fn app() -> (Router, PathBuf) {
@@ -40,7 +43,11 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
@@ -81,7 +88,10 @@ async fn an_unreadable_url_is_refused_before_any_fetch() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(body["message"].as_str().unwrap().contains("GitHub repository URL"));
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("GitHub repository URL"));
 
     let (status, body) = call(
         &app,

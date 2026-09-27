@@ -369,14 +369,22 @@ impl KnowledgeBase {
         // vendor's, and both above generic guidance — a strong generic hit
         // never outranks the organization's policy on the same question.
         // Within a class, the same total order as before.
-        let class_of = |index: usize| provenances.get(corpus[index].chunk.source_hash.as_str()).map(|p| p.rank()).unwrap_or(0);
+        let class_of = |index: usize| {
+            provenances
+                .get(corpus[index].chunk.source_hash.as_str())
+                .map(|p| p.rank())
+                .unwrap_or(0)
+        };
         combined.sort_by(|(a_idx, a_score), (b_idx, b_score)| {
-            class_of(*a_idx).cmp(&class_of(*b_idx)).then_with(|| b_score.total_cmp(a_score)).then_with(|| {
-                corpus[*a_idx]
-                    .chunk
-                    .content_address
-                    .cmp(&corpus[*b_idx].chunk.content_address)
-            })
+            class_of(*a_idx)
+                .cmp(&class_of(*b_idx))
+                .then_with(|| b_score.total_cmp(a_score))
+                .then_with(|| {
+                    corpus[*a_idx]
+                        .chunk
+                        .content_address
+                        .cmp(&corpus[*b_idx].chunk.content_address)
+                })
         });
         let results = combined
             .into_iter()
@@ -396,7 +404,10 @@ impl KnowledgeBase {
                         content_address: chunk.content_address.clone(),
                         byte_start: chunk.byte_start,
                         byte_end: chunk.byte_end,
-                        provenance: provenances.get(chunk.source_hash.as_str()).copied().unwrap_or_default(),
+                        provenance: provenances
+                            .get(chunk.source_hash.as_str())
+                            .copied()
+                            .unwrap_or_default(),
                     },
                     text: corpus[index].text.to_owned(),
                     score,
@@ -522,7 +533,11 @@ impl KnowledgeBase {
     /// purges an expired one: chunks, records and unshared bodies removed,
     /// one tombstone left so old citations stay resolvable, its reason
     /// `Retired`. `None` when no version of the source is held.
-    pub async fn retire(&self, source_id: &str, now: DateTime<Utc>) -> Result<Option<SourceTombstone>> {
+    pub async fn retire(
+        &self,
+        source_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<SourceTombstone>> {
         let versions: Vec<KnowledgeSource> = self
             .store
             .all_sources()
@@ -555,8 +570,12 @@ impl KnowledgeBase {
             }
             self.store.remove_content(&address).await?;
         }
-        let latest = versions.iter().max_by_key(|v| v.version).expect("non-empty");
-        let mut purged_hashes: Vec<String> = versions.iter().map(|v| v.content_hash.clone()).collect();
+        let latest = versions
+            .iter()
+            .max_by_key(|v| v.version)
+            .expect("non-empty");
+        let mut purged_hashes: Vec<String> =
+            versions.iter().map(|v| v.content_hash.clone()).collect();
         purged_hashes.sort();
         let tombstone = SourceTombstone {
             source_id: source_id.to_owned(),

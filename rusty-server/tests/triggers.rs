@@ -421,20 +421,37 @@ async fn repeat_window_acknowledges_an_identical_delivery_without_a_second_run()
     assert_eq!(second["run_id"], json!(run_id));
 
     // A different event still runs.
-    let (status, third) = fire(&app, &trigger_id, &secret, &json!({"message": "printer jams"})).await;
+    let (status, third) = fire(
+        &app,
+        &trigger_id,
+        &secret,
+        &json!({"message": "printer jams"}),
+    )
+    .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{third}");
     assert_eq!(third["status"], json!("executed"));
     assert_ne!(third["run_id"], json!(run_id));
 
     // The log keeps all three; the counters say two runs from three events.
-    let (_, events) = call(&app, &[], "GET", &format!("/triggers/{trigger_id}/events"), None).await;
+    let (_, events) = call(
+        &app,
+        &[],
+        "GET",
+        &format!("/triggers/{trigger_id}/events"),
+        None,
+    )
+    .await;
     let statuses: Vec<&str> = events
         .as_array()
         .unwrap()
         .iter()
         .map(|e| e["status"].as_str().unwrap())
         .collect();
-    assert_eq!(statuses.iter().filter(|s| **s == "duplicate").count(), 1, "{events}");
+    assert_eq!(
+        statuses.iter().filter(|s| **s == "duplicate").count(),
+        1,
+        "{events}"
+    );
     let (_, v) = call(&app, &[], "GET", &format!("/triggers/{trigger_id}"), None).await;
     assert_eq!(v["events_received"], json!(3));
     assert_eq!(v["runs_fired"], json!(2));
@@ -701,10 +718,24 @@ async fn failed_actions_dead_letter_and_replay() {
     // The person who made the webhook is told, once, of the event that
     // could not act.
     let (_, notices) = call(&app, &[], "GET", "/notices", None).await;
-    let told = notices["notices"].as_array().and_then(|a| a.iter().find(|n| n["about"]["kind"] == json!("webhook"))).cloned().expect("the maker is told");
+    let told = notices["notices"]
+        .as_array()
+        .and_then(|a| a.iter().find(|n| n["about"]["kind"] == json!("webhook")))
+        .cloned()
+        .expect("the maker is told");
     assert_eq!(told["about"]["trigger_id"], json!(trigger_id), "{told}");
-    assert_eq!(told["title"], json!("Your webhook on-message could not act on an event"), "{told}");
-    assert!(told["text"].as_str().unwrap_or("").contains("dead-letter list"), "{told}");
+    assert_eq!(
+        told["title"],
+        json!("Your webhook on-message could not act on an event"),
+        "{told}"
+    );
+    assert!(
+        told["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("dead-letter list"),
+        "{told}"
+    );
 
     // The failure is on the event log and the dead-letter list.
     let (_, v) = call(

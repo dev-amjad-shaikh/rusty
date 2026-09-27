@@ -10,17 +10,17 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::context::ContextPolicy;
 use rusty_agent_runtime::llm::Role as ChatRole;
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::ToolSource;
 use rusty_agent_server::{
-    GraphRegistry, PlatformTools, Principal, PrincipalKind, Role as AuthRole, ServerConfig, router,
+    router, GraphRegistry, PlatformTools, Principal, PrincipalKind, Role as AuthRole, ServerConfig,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 /// Calls `memory.remember` when the person states a preference and no

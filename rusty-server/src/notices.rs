@@ -49,9 +49,15 @@ async fn all(state: &AppState, tenant: &str) -> Vec<Notice> {
     all_in(&state.server_store, tenant).await
 }
 
-async fn all_in(store: &std::sync::Arc<dyn crate::server_store::ServerStore>, tenant: &str) -> Vec<Notice> {
+async fn all_in(
+    store: &std::sync::Arc<dyn crate::server_store::ServerStore>,
+    tenant: &str,
+) -> Vec<Notice> {
     match store.kv_list(&namespace(tenant)).await {
-        Ok(items) => items.into_iter().filter_map(|i| serde_json::from_value(i.value).ok()).collect(),
+        Ok(items) => items
+            .into_iter()
+            .filter_map(|i| serde_json::from_value(i.value).ok())
+            .collect(),
         Err(error) => {
             tracing::warn!(%error, "notices could not be read");
             Vec::new()
@@ -64,20 +70,43 @@ async fn keep(state: &AppState, notice: &Notice) {
 }
 
 async fn keep_in(store: &std::sync::Arc<dyn crate::server_store::ServerStore>, notice: &Notice) {
-    if let Err(error) = store.kv_put(&namespace(&notice.tenant), &notice.notice_id, serde_json::to_value(notice).unwrap_or(Value::Null)).await {
+    if let Err(error) = store
+        .kv_put(
+            &namespace(&notice.tenant),
+            &notice.notice_id,
+            serde_json::to_value(notice).unwrap_or(Value::Null),
+        )
+        .await
+    {
         tracing::warn!(%error, notice = %notice.notice_id, "notice not kept");
     }
 }
 
 /// Tell `to` once about the fact `key` names. Answers the notice made, or
 /// `None` when this fact was already told.
-pub(crate) async fn tell(state: &AppState, tenant: &str, to: &Value, key: &str, about: Value, title: &str, text: &str) -> Option<Notice> {
+pub(crate) async fn tell(
+    state: &AppState,
+    tenant: &str,
+    to: &Value,
+    key: &str,
+    about: Value,
+    title: &str,
+    text: &str,
+) -> Option<Notice> {
     tell_in(&state.server_store, tenant, to, key, about, title, text).await
 }
 
 /// The same, from a run's own path, which holds the store and not the
 /// whole state.
-pub(crate) async fn tell_in(store: &std::sync::Arc<dyn crate::server_store::ServerStore>, tenant: &str, to: &Value, key: &str, about: Value, title: &str, text: &str) -> Option<Notice> {
+pub(crate) async fn tell_in(
+    store: &std::sync::Arc<dyn crate::server_store::ServerStore>,
+    tenant: &str,
+    to: &Value,
+    key: &str,
+    about: Value,
+    title: &str,
+    text: &str,
+) -> Option<Notice> {
     if all_in(store, tenant).await.iter().any(|n| n.key == key) {
         return None;
     }
@@ -101,15 +130,27 @@ pub(crate) async fn tell_in(store: &std::sync::Arc<dyn crate::server_store::Serv
 /// The fact `key` names is settled — decided, done, gone — so every notice
 /// about it stops asking: marked seen, kept as the record of the telling.
 pub(crate) async fn settle(state: &AppState, tenant: &str, key: &str) {
-    for mut notice in all(state, tenant).await.into_iter().filter(|n| n.key == key && n.seen_at.is_none()) {
+    for mut notice in all(state, tenant)
+        .await
+        .into_iter()
+        .filter(|n| n.key == key && n.seen_at.is_none())
+    {
         notice.seen_at = Some(Utc::now());
         keep(state, &notice).await;
     }
 }
 
 /// The notices about one assignment, oldest first — its delivery record.
-pub(crate) async fn for_assignment(state: &AppState, tenant: &str, assignment_id: &str) -> Vec<Notice> {
-    let mut mine: Vec<Notice> = all(state, tenant).await.into_iter().filter(|n| n.about.get("assignment_id").and_then(Value::as_str) == Some(assignment_id)).collect();
+pub(crate) async fn for_assignment(
+    state: &AppState,
+    tenant: &str,
+    assignment_id: &str,
+) -> Vec<Notice> {
+    let mut mine: Vec<Notice> = all(state, tenant)
+        .await
+        .into_iter()
+        .filter(|n| n.about.get("assignment_id").and_then(Value::as_str) == Some(assignment_id))
+        .collect();
     mine.sort_by_key(|a| a.created_at);
     mine
 }
@@ -134,16 +175,38 @@ fn is_for(notice: &Notice, tenant: &TenantContext) -> bool {
 }
 
 /// `GET /notices` — the caller's notices, newest first, unseen before seen.
-pub(crate) async fn list_notices(AxumState(state): AxumState<Arc<AppState>>, Extension(tenant): Extension<TenantContext>) -> Result<Json<Value>, ApiError> {
-    let mut mine: Vec<Notice> = all(&state, tenant.tenant()).await.into_iter().filter(|n| is_for(n, &tenant)).collect();
-    mine.sort_by(|a, b| a.seen_at.is_some().cmp(&b.seen_at.is_some()).then(b.created_at.cmp(&a.created_at)));
+pub(crate) async fn list_notices(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+) -> Result<Json<Value>, ApiError> {
+    let mut mine: Vec<Notice> = all(&state, tenant.tenant())
+        .await
+        .into_iter()
+        .filter(|n| is_for(n, &tenant))
+        .collect();
+    mine.sort_by(|a, b| {
+        a.seen_at
+            .is_some()
+            .cmp(&b.seen_at.is_some())
+            .then(b.created_at.cmp(&a.created_at))
+    });
     Ok(Json(json!({"notices": mine})))
 }
 
 /// `POST /notices/{id}/seen` — the addressee read it; the moment is kept.
-pub(crate) async fn mark_seen(AxumState(state): AxumState<Arc<AppState>>, Extension(tenant): Extension<TenantContext>, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
-    let item = state.server_store.kv_get(&namespace(tenant.tenant()), &id).await.map_err(|e| ApiError::internal(e.to_string()))?;
-    let mut notice: Notice = item.and_then(|i| serde_json::from_value(i.value).ok()).ok_or_else(|| ApiError::not_found(format!("no notice `{id}`")))?;
+pub(crate) async fn mark_seen(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let item = state
+        .server_store
+        .kv_get(&namespace(tenant.tenant()), &id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let mut notice: Notice = item
+        .and_then(|i| serde_json::from_value(i.value).ok())
+        .ok_or_else(|| ApiError::not_found(format!("no notice `{id}`")))?;
     if !is_for(&notice, &tenant) {
         return Err(ApiError::not_found(format!("no notice `{id}`")));
     }
@@ -159,7 +222,18 @@ mod tests {
     use super::*;
 
     fn notice(seen: bool) -> Notice {
-        Notice { notice_id: "n".into(), tenant: "t".into(), to: json!({"principal_id": "bob"}), about: json!({"kind": "assignment", "assignment_id": "a", "state": "done"}), key: "k".into(), title: "Done".into(), text: "".into(), channel: "inbox".into(), created_at: Utc::now(), seen_at: seen.then(Utc::now) }
+        Notice {
+            notice_id: "n".into(),
+            tenant: "t".into(),
+            to: json!({"principal_id": "bob"}),
+            about: json!({"kind": "assignment", "assignment_id": "a", "state": "done"}),
+            key: "k".into(),
+            title: "Done".into(),
+            text: "".into(),
+            channel: "inbox".into(),
+            created_at: Utc::now(),
+            seen_at: seen.then(Utc::now),
+        }
     }
 
     #[test]

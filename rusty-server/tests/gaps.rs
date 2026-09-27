@@ -11,11 +11,11 @@
 
 use std::path::PathBuf;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use axum::Router;
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 // --------------------------------------------------------------------- //
@@ -715,22 +715,46 @@ async fn a_zero_recall_query_files_a_gap_against_the_question_shape() {
     let order = work_order(&app).await;
     assert_eq!(order.len(), 1);
     assert_eq!(order[0]["volume"], json!(1), "{}", order[0]);
-    assert_eq!(order[0]["evidence"].as_array().map(Vec::len), Some(1), "{}", order[0]);
+    assert_eq!(
+        order[0]["evidence"].as_array().map(Vec::len),
+        Some(1),
+        "{}",
+        order[0]
+    );
     let gap_id = order[0]["gap_id"].as_str().unwrap().to_owned();
 
     // The other half: the same named question answered later closes the
     // gap it filed — the block it said was empty is filled.
-    let (status, v) = call(&app, "POST", "/memory", Some(write_payload(json!({"key": "vpn-runbook"})))).await;
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/memory",
+        Some(write_payload(json!({"key": "vpn-runbook"}))),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "write failed: {v}");
-    let (status, v) = call(&app, "POST", "/memory/query", Some(json!({"key": "vpn-runbook"}))).await;
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/memory/query",
+        Some(json!({"key": "vpn-runbook"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "query failed: {v}");
     assert_eq!(v["records"].as_array().unwrap().len(), 1);
-    assert!(work_order(&app).await.is_empty(), "the answered question left the queue");
+    assert!(
+        work_order(&app).await.is_empty(),
+        "the answered question left the queue"
+    );
     let closed = get_gap(&app, &gap_id).await;
     assert_eq!(closed["entry"]["status"], "closed", "{}", closed["entry"]);
     assert_eq!(closed["entry"]["resolution"], "block:vpn-runbook");
     let (_, listed) = call(&app, "GET", "/gaps", None).await;
-    assert_eq!(listed["closed"][0]["gap_id"], json!(gap_id), "the lane lists it as closed: {listed}");
+    assert_eq!(
+        listed["closed"][0]["gap_id"],
+        json!(gap_id),
+        "the lane lists it as closed: {listed}"
+    );
 
     // An unfiltered browse that finds nothing is not a learning signal.
     let store2 = temp_store();

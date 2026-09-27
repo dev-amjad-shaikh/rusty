@@ -69,7 +69,12 @@ pub(crate) fn head_of(snapshot: &JournalSnapshot) -> JournalHead {
     let declared = snapshot
         .events
         .iter()
-        .find(|event| serde_json::to_value(event.kind).ok().and_then(|k| k.as_str().map(str::to_owned)) == Some("run_config_declared".to_owned()))
+        .find(|event| {
+            serde_json::to_value(event.kind)
+                .ok()
+                .and_then(|k| k.as_str().map(str::to_owned))
+                == Some("run_config_declared".to_owned())
+        })
         .and_then(|event| crate::replay::resolve(snapshot, event.output.as_ref()))
         .filter(Value::is_object);
     JournalHead {
@@ -108,7 +113,11 @@ pub(crate) fn asked_in(input: &Value) -> Option<String> {
         .and_then(|m| m.get("content"))?;
     let text = match content {
         Value::String(s) => s.clone(),
-        Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join(" "),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => return None,
     };
     let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -126,7 +135,12 @@ fn heads_dir(root: &Path) -> PathBuf {
 /// Write the head as the journal is kept: a person's run's head is sealed
 /// under their key, so a store without the key lists the run no more
 /// than it can read it (a backup restored after a forget, say).
-async fn write_head(root: &Path, head: &JournalHead, vault: Option<&crate::vault::PersonVault>, person: Option<(&str, &str)>) -> io::Result<()> {
+async fn write_head(
+    root: &Path,
+    head: &JournalHead,
+    vault: Option<&crate::vault::PersonVault>,
+    person: Option<(&str, &str)>,
+) -> io::Result<()> {
     let dir = heads_dir(root);
     tokio::fs::create_dir_all(&dir).await?;
     let bytes = crate::vault::record_bytes(vault, person, "journal-head", &head.run_id, head)?;
@@ -138,9 +152,15 @@ async fn write_head(root: &Path, head: &JournalHead, vault: Option<&crate::vault
 /// `Ok(Some)` for a head this store can read; `Ok(None)` when there is
 /// none, or it is sealed for a key not held here (the journal reads the
 /// same way, so nothing is backfilled for it).
-async fn read_head(root: &Path, run_id: &str, vault: Option<&crate::vault::PersonVault>) -> io::Result<Option<Option<JournalHead>>> {
+async fn read_head(
+    root: &Path,
+    run_id: &str,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Option<Option<JournalHead>>> {
     match tokio::fs::read(heads_dir(root).join(format!("{run_id}.json"))).await {
-        Ok(bytes) => Ok(Some(crate::vault::record_from_bytes(vault, "journal-head", run_id, &bytes).unwrap_or(None))),
+        Ok(bytes) => Ok(Some(
+            crate::vault::record_from_bytes(vault, "journal-head", run_id, &bytes).unwrap_or(None),
+        )),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }
@@ -156,7 +176,12 @@ pub(crate) fn dir(root: &Path) -> PathBuf {
 /// Persist `snapshot`, replacing any earlier snapshot of the same run.
 /// Keep `snapshot`; a person's run is sealed under their key (see
 /// [`crate::vault`]), nobody's is plain.
-pub(crate) async fn persist(root: &Path, snapshot: &JournalSnapshot, vault: Option<&crate::vault::PersonVault>, person: Option<(&str, &str)>) -> io::Result<()> {
+pub(crate) async fn persist(
+    root: &Path,
+    snapshot: &JournalSnapshot,
+    vault: Option<&crate::vault::PersonVault>,
+    person: Option<(&str, &str)>,
+) -> io::Result<()> {
     let dir = dir(root);
     tokio::fs::create_dir_all(&dir).await?;
     let bytes = crate::vault::record_bytes(vault, person, "journal", &snapshot.run_id, snapshot)?;
@@ -178,7 +203,11 @@ pub(crate) async fn persist(root: &Path, snapshot: &JournalSnapshot, vault: Opti
 /// (a queued run, or one that failed before its first checkpoint boundary).
 /// The journal, or `None` when there is none — or when it is sealed for
 /// a person whose key this store does not hold.
-pub(crate) async fn get(root: &Path, run_id: &str, vault: Option<&crate::vault::PersonVault>) -> io::Result<Option<JournalSnapshot>> {
+pub(crate) async fn get(
+    root: &Path,
+    run_id: &str,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Option<JournalSnapshot>> {
     let path = dir(root).join(format!("{run_id}.json"));
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
@@ -203,7 +232,10 @@ pub(crate) async fn remove(root: &Path, run_id: &str) -> io::Result<bool> {
 /// were kept — is read once, and its head written, so the next listing
 /// reads none. A sealed journal whose key is not here has no head and is
 /// absent, as it is from the listing.
-pub(crate) async fn list_heads(root: &Path, vault: Option<&crate::vault::PersonVault>) -> io::Result<Vec<JournalHead>> {
+pub(crate) async fn list_heads(
+    root: &Path,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Vec<JournalHead>> {
     let dir = dir(root);
     let mut entries = match tokio::fs::read_dir(&dir).await {
         Ok(entries) => entries,
@@ -234,9 +266,22 @@ pub(crate) async fn list_heads(root: &Path, vault: Option<&crate::vault::PersonV
             Ok(Some(snapshot)) => {
                 let head = head_of(&snapshot);
                 // Sealed as the journal was, for the person it names.
-                let sealed_for = serde_json::from_slice::<Value>(&bytes).ok().and_then(|v| v.get("sealed_for").cloned());
-                let person = sealed_for.as_ref().and_then(|p| Some((p.get("tenant")?.as_str()?.to_owned(), p.get("principal")?.as_str()?.to_owned())));
-                write_head(root, &head, vault, person.as_ref().map(|(t, p)| (t.as_str(), p.as_str()))).await?;
+                let sealed_for = serde_json::from_slice::<Value>(&bytes)
+                    .ok()
+                    .and_then(|v| v.get("sealed_for").cloned());
+                let person = sealed_for.as_ref().and_then(|p| {
+                    Some((
+                        p.get("tenant")?.as_str()?.to_owned(),
+                        p.get("principal")?.as_str()?.to_owned(),
+                    ))
+                });
+                write_head(
+                    root,
+                    &head,
+                    vault,
+                    person.as_ref().map(|(t, p)| (t.as_str(), p.as_str())),
+                )
+                .await?;
                 backfilled += 1;
                 heads.push(head);
             }
@@ -245,7 +290,10 @@ pub(crate) async fn list_heads(root: &Path, vault: Option<&crate::vault::PersonV
         }
     }
     if backfilled > 0 {
-        tracing::info!(backfilled, "journal heads written for journals that had none");
+        tracing::info!(
+            backfilled,
+            "journal heads written for journals that had none"
+        );
     }
     heads.sort_by(|a, b| a.run_id.cmp(&b.run_id));
     Ok(heads)
@@ -256,7 +304,10 @@ pub(crate) async fn list_heads(root: &Path, vault: Option<&crate::vault::PersonV
 /// listing — the health board reads journals to *derive* state, and one
 /// corrupt file must not blind it to everything else (the corrupt file's
 /// own read path still surfaces the error).
-pub(crate) async fn list(root: &Path, vault: Option<&crate::vault::PersonVault>) -> io::Result<Vec<JournalSnapshot>> {
+pub(crate) async fn list(
+    root: &Path,
+    vault: Option<&crate::vault::PersonVault>,
+) -> io::Result<Vec<JournalSnapshot>> {
     let dir = dir(root);
     let mut entries = match tokio::fs::read_dir(&dir).await {
         Ok(entries) => entries,
@@ -298,7 +349,9 @@ mod tests {
             EventDraft::new(RunEventKind::CheckpointWritten, Effect::Pure).parent("run-1:0"),
         );
 
-        persist(&root, &journal.snapshot(), None, None).await.unwrap();
+        persist(&root, &journal.snapshot(), None, None)
+            .await
+            .unwrap();
         let loaded = get(&root, "run-1", None)
             .await
             .unwrap()
@@ -309,7 +362,9 @@ mod tests {
 
         // A later snapshot of the same run replaces the earlier file.
         journal.record(EventDraft::new(RunEventKind::SuperStepEnd, Effect::Pure));
-        persist(&root, &journal.snapshot(), None, None).await.unwrap();
+        persist(&root, &journal.snapshot(), None, None)
+            .await
+            .unwrap();
         let loaded = get(&root, "run-1", None)
             .await
             .unwrap()
@@ -364,9 +419,18 @@ mod tests {
             std::env::temp_dir().join(format!("rusty-journals-test-{}", uuid::Uuid::new_v4()));
         let journal = Journal::new("run-new", "thread-1", Clock::System);
         journal.record(EventDraft::new(RunEventKind::SuperStepStart, Effect::Pure));
-        journal.record(EventDraft::new(RunEventKind::CheckpointWritten, Effect::Pure).parent("run-new:0").output(serde_json::json!({"checkpoint_id": "cp-1"})));
-        persist(&root, &journal.snapshot(), None, None).await.unwrap();
-        assert!(read_head(&root, "run-new", None).await.unwrap().is_some(), "a persist writes the head");
+        journal.record(
+            EventDraft::new(RunEventKind::CheckpointWritten, Effect::Pure)
+                .parent("run-new:0")
+                .output(serde_json::json!({"checkpoint_id": "cp-1"})),
+        );
+        persist(&root, &journal.snapshot(), None, None)
+            .await
+            .unwrap();
+        assert!(
+            read_head(&root, "run-new", None).await.unwrap().is_some(),
+            "a persist writes the head"
+        );
 
         // An older journal, written before heads: the file alone.
         let old = Journal::new("run-old", "thread-1", Clock::System);
@@ -376,19 +440,35 @@ mod tests {
         assert!(read_head(&root, "run-old", None).await.unwrap().is_none());
 
         let heads = list_heads(&root, None).await.unwrap();
-        assert_eq!(heads.iter().map(|h| h.run_id.as_str()).collect::<Vec<_>>(), vec!["run-new", "run-old"]);
+        assert_eq!(
+            heads.iter().map(|h| h.run_id.as_str()).collect::<Vec<_>>(),
+            vec!["run-new", "run-old"]
+        );
         let new = heads.iter().find(|h| h.run_id == "run-new").unwrap();
         assert_eq!(new.status, "success");
         assert_eq!(new.events, 2);
         assert_eq!(new.checkpoint_ids, vec!["cp-1"]);
         assert!(new.verified && new.first_at.is_some());
-        assert!(read_head(&root, "run-old", None).await.unwrap().is_some(), "the first listing backfills the head");
+        assert!(
+            read_head(&root, "run-old", None).await.unwrap().is_some(),
+            "the first listing backfills the head"
+        );
 
         // The journal files are the listing; a head alone lists nothing.
         std::fs::remove_file(dir(&root).join("run-old.json")).unwrap();
-        assert!(list_heads(&root, None).await.unwrap().iter().all(|h| h.run_id != "run-old"), "no journal, no listing");
+        assert!(
+            list_heads(&root, None)
+                .await
+                .unwrap()
+                .iter()
+                .all(|h| h.run_id != "run-old"),
+            "no journal, no listing"
+        );
         assert!(remove(&root, "run-new").await.unwrap());
-        assert!(read_head(&root, "run-new", None).await.unwrap().is_none(), "a removed journal takes its head");
+        assert!(
+            read_head(&root, "run-new", None).await.unwrap().is_none(),
+            "a removed journal takes its head"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

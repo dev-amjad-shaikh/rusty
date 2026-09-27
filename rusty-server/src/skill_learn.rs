@@ -110,12 +110,23 @@ pub(crate) fn render(title: &str, value: &Value, rows: usize) -> String {
             }
         }
     }
-    out.push_str(&format!("{} record(s){}.\n\n", list.len(), if list.len() > rows { format!(", the first {rows} shown") } else { String::new() }));
+    out.push_str(&format!(
+        "{} record(s){}.\n\n",
+        list.len(),
+        if list.len() > rows {
+            format!(", the first {rows} shown")
+        } else {
+            String::new()
+        }
+    ));
     out.push_str(&format!("| {} |\n", columns.join(" | ")));
     out.push_str(&format!("|{}\n", "---|".repeat(columns.len())));
     for row in list.iter().take(rows) {
         let obj = row.as_object().expect("checked above");
-        let cells: Vec<String> = columns.iter().map(|c| cell(obj.get(c).unwrap_or(&Value::Null))).collect();
+        let cells: Vec<String> = columns
+            .iter()
+            .map(|c| cell(obj.get(c).unwrap_or(&Value::Null)))
+            .collect();
         out.push_str(&format!("| {} |\n", cells.join(" | ")));
     }
     out.push('\n');
@@ -126,9 +137,16 @@ pub(crate) fn render(title: &str, value: &Value, rows: usize) -> String {
 /// tool that exists. Returns the reference text and the rows it holds.
 /// Run the reads, render the reference, and stamp what each one answered
 /// so a later check can tell whether the system has moved.
-pub(crate) async fn learn(state: &AppState, skill: &str, reads: &[LearnRead]) -> Result<(String, usize, Vec<crate::freshness::ReadStamp>), String> {
+pub(crate) async fn learn(
+    state: &AppState,
+    skill: &str,
+    reads: &[LearnRead],
+) -> Result<(String, usize, Vec<crate::freshness::ReadStamp>), String> {
     if reads.is_empty() {
-        return Err("nothing to learn: the skill declares no ```learn block and the request names no reads".to_owned());
+        return Err(
+            "nothing to learn: the skill declares no ```learn block and the request names no reads"
+                .to_owned(),
+        );
     }
     let Some(cell) = &state.connection_tools else {
         return Err("this server mounts no connection tools".to_owned());
@@ -143,10 +161,16 @@ pub(crate) async fn learn(state: &AppState, skill: &str, reads: &[LearnRead]) ->
     let mut stamps = Vec::with_capacity(reads.len());
     for read in reads {
         let Some(tool) = tools.iter().find(|t| t.name() == read.tool) else {
-            return Err(format!("`{}` is not a tool of any connected system; catalog.tools names them", read.tool));
+            return Err(format!(
+                "`{}` is not a tool of any connected system; catalog.tools names them",
+                read.tool
+            ));
         };
         if !matches!(tool.effect(), Effect::ReadOnly) {
-            return Err(format!("`{}` is not read-only; a skill learns from reads only", read.tool));
+            return Err(format!(
+                "`{}` is not read-only; a skill learns from reads only",
+                read.tool
+            ));
         }
         let answer = tool
             .call(read.arguments.clone())
@@ -154,7 +178,12 @@ pub(crate) async fn learn(state: &AppState, skill: &str, reads: &[LearnRead]) ->
             .map_err(|e| format!("`{}` ({}): {e}", read.title, read.tool))?;
         stamps.push(crate::freshness::stamp_read(read, &answer));
         let rows = read.rows.unwrap_or(DEFAULT_ROWS).clamp(1, 500);
-        let count = answer.get("result").and_then(Value::as_array).map(Vec::len).or_else(|| answer.as_array().map(Vec::len)).unwrap_or(0);
+        let count = answer
+            .get("result")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .or_else(|| answer.as_array().map(Vec::len))
+            .unwrap_or(0);
         rows_total += count.min(rows);
         text.push_str(&format!("<!-- {} {} -->\n", read.tool, read.arguments));
         text.push_str(&render(&read.title, &answer, rows));
@@ -173,7 +202,10 @@ pub(crate) fn skill_md_of(version: &SkillVersion) -> String {
     let m = version.metadata();
     let mut out = String::from("---\n");
     out.push_str(&format!("name: {}\n", m.name));
-    out.push_str(&format!("description: {}\n", m.description.replace('\n', " ")));
+    out.push_str(&format!(
+        "description: {}\n",
+        m.description.replace('\n', " ")
+    ));
     if let Some(license) = &m.license {
         out.push_str(&format!("license: {license}\n"));
     }
@@ -217,14 +249,28 @@ pub(crate) async fn learn_skill(
         return ApiError::not_found(format!("no skill `{name}`")).into_response();
     };
     let declared = declared_plan(version.body());
-    let reads: Vec<LearnRead> = if payload.reads.is_empty() { declared.as_ref().map(|p| p.reads.clone()).unwrap_or_default() } else { payload.reads.clone() };
+    let reads: Vec<LearnRead> = if payload.reads.is_empty() {
+        declared
+            .as_ref()
+            .map(|p| p.reads.clone())
+            .unwrap_or_default()
+    } else {
+        payload.reads.clone()
+    };
     let reference = payload
         .reference
         .or_else(|| declared.as_ref().and_then(|p| p.reference.clone()))
         .unwrap_or_else(|| format!("learned/{name}.md"));
-    let reference = reference.trim().trim_start_matches("references/").trim_start_matches('/').to_owned();
+    let reference = reference
+        .trim()
+        .trim_start_matches("references/")
+        .trim_start_matches('/')
+        .to_owned();
     if reference.is_empty() || reference.contains("..") {
-        return ApiError::bad_request("the reference path must be a plain path beneath references/".to_owned()).into_response();
+        return ApiError::bad_request(
+            "the reference path must be a plain path beneath references/".to_owned(),
+        )
+        .into_response();
     }
     let (text, rows, stamps) = match learn(&state, &name, &reads).await {
         Ok(learned) => learned,
@@ -237,26 +283,44 @@ pub(crate) async fn learn_skill(
     let kept_references: Vec<String> = version.reference_paths().map(str::to_owned).collect();
     for path in kept_references {
         if let Some(bytes) = version.reference(&path) {
-            let key = if path.starts_with("references/") { path.clone() } else { format!("references/{path}") };
+            let key = if path.starts_with("references/") {
+                path.clone()
+            } else {
+                format!("references/{path}")
+            };
             files.insert(key, bytes.to_vec());
         }
     }
     let kept_assets: Vec<String> = version.asset_paths().map(str::to_owned).collect();
     for path in kept_assets {
         if let Some(bytes) = version.asset(&path) {
-            let key = if path.starts_with("assets/") { path.clone() } else { format!("assets/{path}") };
+            let key = if path.starts_with("assets/") {
+                path.clone()
+            } else {
+                format!("assets/{path}")
+            };
             files.insert(key, bytes.to_vec());
         }
     }
     files.insert(format!("references/{reference}"), text.into_bytes());
     let package = match SkillPackage::from_files(files) {
         Ok(package) => package,
-        Err(error) => return ApiError::bad_request(format!("the learned skill does not package: {error}")).into_response(),
+        Err(error) => {
+            return ApiError::bad_request(format!("the learned skill does not package: {error}"))
+                .into_response()
+        }
     };
     let author = tenant.principal().name.clone();
     match state
         .skills
-        .register(tenant.tenant(), package, SkillSource::Registry { name: "rusty-server".to_owned() }, author)
+        .register(
+            tenant.tenant(),
+            package,
+            SkillSource::Registry {
+                name: "rusty-server".to_owned(),
+            },
+            author,
+        )
         .await
     {
         Ok(registration) => {
@@ -280,7 +344,16 @@ pub(crate) async fn learn_skill(
             let gate = if registration.already_registered {
                 Value::Null
             } else {
-                json!(crate::skills::after_registration(&state, &tenant, registration.version.name(), registration.version.revision()).await.0)
+                json!(
+                    crate::skills::after_registration(
+                        &state,
+                        &tenant,
+                        registration.version.name(),
+                        registration.version.revision()
+                    )
+                    .await
+                    .0
+                )
             };
             Json(json!({
                 "name": name,
@@ -314,14 +387,27 @@ pub(crate) async fn get_skill_reference(
         return ApiError::not_found(format!("no skill `{name}`")).into_response();
     };
     let wanted = query.path.trim_start_matches('/');
-    let bytes = version.reference(wanted).or_else(|| version.reference(&format!("references/{wanted}")));
+    let bytes = version
+        .reference(wanted)
+        .or_else(|| version.reference(&format!("references/{wanted}")));
     match bytes {
         Some(bytes) => {
             // A reference the last check found stale still reads, and says so.
-            let (text, _) = crate::freshness::as_read(&state, tenant.tenant(), &name, String::from_utf8_lossy(bytes).into_owned()).await;
-            ([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], text.into_bytes()).into_response()
+            let (text, _) = crate::freshness::as_read(
+                &state,
+                tenant.tenant(),
+                &name,
+                String::from_utf8_lossy(bytes).into_owned(),
+            )
+            .await;
+            (
+                [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+                text.into_bytes(),
+            )
+                .into_response()
         }
-        None => ApiError::not_found(format!("skill `{name}` has no reference `{wanted}`")).into_response(),
+        None => ApiError::not_found(format!("skill `{name}` has no reference `{wanted}`"))
+            .into_response(),
     }
 }
 

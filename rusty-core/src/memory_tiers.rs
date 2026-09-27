@@ -135,9 +135,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, RustyError};
 use crate::journal::{EventDraft, Journal, JournalSnapshot};
 use crate::memory::{
-    ContextBudget, JournaledMemory, MemoryAssembly, MemoryKind, MemoryQuery, MemoryRecord,
-    MemoryReplaySource, MemoryScope, MemoryStore, TOKEN_BYTES_PER_ESTIMATE, TokenAccounting,
-    assemble, estimated_tokens, memory_read_request,
+    assemble, estimated_tokens, memory_read_request, ContextBudget, JournaledMemory,
+    MemoryAssembly, MemoryKind, MemoryQuery, MemoryRecord, MemoryReplaySource, MemoryScope,
+    MemoryStore, TokenAccounting, TOKEN_BYTES_PER_ESTIMATE,
 };
 use crate::record::{Effect, PayloadRef, RunEvent, RunEventKind};
 

@@ -600,14 +600,28 @@ pub(crate) async fn commit_from_live_run(
 ) -> Result<Value, String> {
     let run_id = journal.run_id().to_owned();
     let sha256 = sha256_hex(bytes);
-    if let Some(existing) = state.server_store.get_run_artifact(tenant.tenant(), &sha256).await.map_err(|e| e.to_string())? {
+    if let Some(existing) = state
+        .server_store
+        .get_run_artifact(tenant.tenant(), &sha256)
+        .await
+        .map_err(|e| e.to_string())?
+    {
         if existing.name.as_deref() == Some(name) {
             let version = existing.versions.len().saturating_sub(1);
-            return Ok(json!({"artifact_id": existing.artifact_id, "name": name, "version": version, "bytes": bytes.len(), "sha256": sha256, "created": false, "note": "these exact bytes were already committed under this name"}));
+            return Ok(
+                json!({"artifact_id": existing.artifact_id, "name": name, "version": version, "bytes": bytes.len(), "sha256": sha256, "created": false, "note": "these exact bytes were already committed under this name"}),
+            );
         }
-        return Err(format!("these exact bytes are already committed under name `{}`; one object carries one name", existing.name.as_deref().unwrap_or("(unnamed)")));
+        return Err(format!(
+            "these exact bytes are already committed under name `{}`; one object carries one name",
+            existing.name.as_deref().unwrap_or("(unnamed)")
+        ));
     }
-    let event_id = journal.events().last().map(|e| e.id.clone()).unwrap_or_else(|| format!("{run_id}:0"));
+    let event_id = journal
+        .events()
+        .last()
+        .map(|e| e.id.clone())
+        .unwrap_or_else(|| format!("{run_id}:0"));
     let effect_id = sha256_hex(format!("artifact:{name}:{sha256}").as_bytes());
     let lineage = ArtifactLineage {
         run_id: run_id.clone(),
@@ -615,7 +629,10 @@ pub(crate) async fn commit_from_live_run(
         event_id,
     };
     let declaration = CommitDeclaration {
-        reference: ArtifactRef { sha256: sha256.clone(), bytes: bytes.len() as u64 },
+        reference: ArtifactRef {
+            sha256: sha256.clone(),
+            bytes: bytes.len() as u64,
+        },
         name: Some(name.to_owned()),
         media_kind: MediaKind::File,
         media_type: Some(media_type.to_owned()),
@@ -623,14 +640,25 @@ pub(crate) async fn commit_from_live_run(
         retention: RetentionPolicy::default(),
         committed_at: Utc::now(),
     };
-    let head = state.server_store.get_run_artifact_by_name(tenant.tenant(), name).await.map_err(|e| e.to_string())?;
+    let head = state
+        .server_store
+        .get_run_artifact_by_name(tenant.tenant(), name)
+        .await
+        .map_err(|e| e.to_string())?;
     let (record, commitment) = match &head {
         Some(head) => append_artifact_version(head, declaration).map_err(|e| e.to_string())?,
         None => commit_artifact(declaration).map_err(|e| e.to_string())?,
     };
-    let stored = state.server_store.put_run_artifact_bytes(bytes).await.map_err(|e| e.to_string())?;
+    let stored = state
+        .server_store
+        .put_run_artifact_bytes(bytes)
+        .await
+        .map_err(|e| e.to_string())?;
     if stored.sha256 != record.artifact_id {
-        return Err(format!("the byte store minted `{}` for bytes declared as `{}`; nothing was recorded", stored.sha256, record.artifact_id));
+        return Err(format!(
+            "the byte store minted `{}` for bytes declared as `{}`; nothing was recorded",
+            stored.sha256, record.artifact_id
+        ));
     }
     match &head {
         Some(head) => match state.server_store.put_run_artifact_version(tenant.tenant(), &head.artifact_id, &record).await.map_err(|e| e.to_string())? {

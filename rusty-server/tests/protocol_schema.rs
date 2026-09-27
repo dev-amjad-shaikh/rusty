@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use rusty_agent_server::protocol::{
     ClientIdentity, ConnectAuth, ConnectParams, ConnectSnapshot, ErrorShape, EventFrame, Features,
-    GatewayFrame, GraphSummary, GrantedAuth, HelloOk, PolicyBudgets, RequestFrame, ResponseFrame,
+    GatewayFrame, GrantedAuth, GraphSummary, HelloOk, PolicyBudgets, RequestFrame, ResponseFrame,
     ServerIdentity, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};

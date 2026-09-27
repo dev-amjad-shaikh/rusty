@@ -7,17 +7,17 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::error::Result as RustyResult;
 use rusty_agent_runtime::llm::Role as ChatRole;
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::react::create_react_agent;
 use rusty_agent_runtime::state::{Reducer, StateSpec};
 use rusty_agent_runtime::tool::{ToolRegistry, ToolSource};
-use rusty_agent_server::{GraphRegistry, PlatformTools, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, PlatformTools, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 type Seen = Arc<Mutex<Vec<Vec<ChatMessage>>>>;
@@ -336,12 +336,10 @@ async fn a_round_a_restart_caught_running_is_closed_from_its_journal_and_the_wor
         settled_record["rounds"][1]["status"], "restart",
         "{settled_record}"
     );
-    assert!(
-        settled_record["rounds"][1]["error"]
-            .as_str()
-            .unwrap()
-            .contains("restarted")
-    );
+    assert!(settled_record["rounds"][1]["error"]
+        .as_str()
+        .unwrap()
+        .contains("restarted"));
     assert_eq!(settled_record["rounds"][2]["status"], "success");
     assert_eq!(settled_record["state"], "done", "{settled_record}");
     let asked: Vec<String> = seen
@@ -447,8 +445,8 @@ impl ChatModel for Poller {
 }
 
 #[tokio::test]
-async fn a_round_whose_reads_answer_nothing_new_stops_early_and_the_next_round_is_steered_with_the_reason()
- {
+async fn a_round_whose_reads_answer_nothing_new_stops_early_and_the_next_round_is_steered_with_the_reason(
+) {
     let store =
         std::env::temp_dir().join(format!("rusty-server-assignments-{}", uuid::Uuid::new_v4()));
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));

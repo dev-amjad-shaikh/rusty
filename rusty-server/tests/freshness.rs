@@ -27,7 +27,11 @@ struct Brief;
 #[async_trait::async_trait]
 impl ChatModel for Brief {
     async fn chat(&self, _m: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("noted"), model: Some("brief".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("noted"),
+            model: Some("brief".into()),
+            usage: None,
+        })
     }
 }
 
@@ -38,8 +42,11 @@ fn app(store: &std::path::Path) -> Router {
     let graph = create_react_agent(Arc::new(Brief), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
-    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf()).with_connection_tools(connection_tools);
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
+    let config = ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf())
+        .with_connection_tools(connection_tools);
     router(registry, config)
 }
 
@@ -52,10 +59,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -70,16 +84,35 @@ async fn a_skill_that_has_learned_nothing_says_so_and_a_check_refuses_with_the_r
     let (status, freshness) = call(&app, "GET", "/skills/count-well/freshness", None).await;
     assert_eq!(status, StatusCode::OK, "{freshness}");
     assert_eq!(freshness["learned"], false);
-    assert!(freshness["note"].as_str().unwrap().contains("learned nothing"), "{freshness}");
+    assert!(
+        freshness["note"]
+            .as_str()
+            .unwrap()
+            .contains("learned nothing"),
+        "{freshness}"
+    );
 
     // And a check has nothing to compare against, said in words.
-    let (status, refused) = call(&app, "POST", "/skills/count-well/freshness", Some(json!({}))).await;
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/skills/count-well/freshness",
+        Some(json!({})),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
-    assert!(refused.to_string().contains("learned nothing yet"), "{refused}");
+    assert!(
+        refused.to_string().contains("learned nothing yet"),
+        "{refused}"
+    );
 
     // A skill nobody has is not a freshness question either.
     let (status, _) = call(&app, "GET", "/skills/no-such-skill/freshness", None).await;
-    assert_eq!(status, StatusCode::OK, "an unlearned skill and an unknown one read the same way");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an unlearned skill and an unknown one read the same way"
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -111,14 +144,18 @@ fn what_the_platform_says_moved_is_what_a_person_would_say() {
         moved_since(&then, &now),
         vec![
             "Resolutions: 12 records → 18".to_owned(),
-            "Resolutions: newest sys_updated_on 2026-09-01 10:00:00 → 2026-09-11 09:00:00".to_owned(),
+            "Resolutions: newest sys_updated_on 2026-09-01 10:00:00 → 2026-09-11 09:00:00"
+                .to_owned(),
         ]
     );
 
     // An edit in place moves neither count nor watermark; the digest is
     // what catches it, and it is said plainly rather than silently missed.
     let edited = vec![stamp("Resolutions", 12, Some("2026-09-01 10:00:00"), "ccc")];
-    assert_eq!(moved_since(&then, &edited), vec!["Resolutions: the answer changed".to_owned()]);
+    assert_eq!(
+        moved_since(&then, &edited),
+        vec!["Resolutions: the answer changed".to_owned()]
+    );
 
     // A stale reference still reads, with what moved said above it.
     let marked = Stamp {
@@ -129,10 +166,16 @@ fn what_the_platform_says_moved_is_what_a_person_would_say() {
         reads: then,
         checked_at: Some("2026-09-11T02:00:00Z".parse().unwrap()),
         stale: true,
-        because: moved_since(&[stamp("Resolutions", 12, Some("2026-09-01 10:00:00"), "aaa")], &now),
+        because: moved_since(
+            &[stamp("Resolutions", 12, Some("2026-09-01 10:00:00"), "aaa")],
+            &now,
+        ),
     };
     let said = notice(&marked);
     assert!(said.contains("STALE"), "{said}");
     assert!(said.contains("12 records → 18"), "{said}");
-    assert!(said.contains("read the system for anything that matters"), "{said}");
+    assert!(
+        said.contains("read the system for anything that matters"),
+        "{said}"
+    );
 }

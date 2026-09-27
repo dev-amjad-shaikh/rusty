@@ -210,8 +210,14 @@ async fn recalls_live_and_persisted_runs_once_each_newest_first() {
     assert_eq!(excerpt.chars().count(), 500, "excerpt is bounded");
     // Every run says who started it — the developer principal, in open mode —
     // and a run that declared no objective carries no `studio` key.
-    assert_eq!(list[0]["metadata"]["created_by"]["principal_id"], json!("dev"));
-    assert!(list[0]["metadata"].get("studio").is_none(), "no objective, no studio key");
+    assert_eq!(
+        list[0]["metadata"]["created_by"]["principal_id"],
+        json!("dev")
+    );
+    assert!(
+        list[0]["metadata"].get("studio").is_none(),
+        "no objective, no studio key"
+    );
 
     // Reboot over the same store: the manager is empty, so both entries
     // now come from what the store kept — the accepted-run record and the
@@ -222,7 +228,11 @@ async fn recalls_live_and_persisted_runs_once_each_newest_first() {
     // declared configuration and survives too.
     let rebooted = app(&store, false);
     let list = recall_as(&rebooted, None, "/runs").await;
-    assert_eq!(list.len(), 2, "the store keeps the runs reachable: {list:?}");
+    assert_eq!(
+        list.len(),
+        2,
+        "the store keeps the runs reachable: {list:?}"
+    );
     assert_eq!(list[0]["run_id"], json!(second_run));
     assert_eq!(list[1]["run_id"], json!(first_run));
     for entry in &list {
@@ -232,7 +242,10 @@ async fn recalls_live_and_persisted_runs_once_each_newest_first() {
             entry["created_at"].as_str().is_some(),
             "the journal's earliest recorded_at stands in: {entry}"
         );
-        assert_eq!(entry["metadata"]["created_by"]["principal_id"], json!("dev"));
+        assert_eq!(
+            entry["metadata"]["created_by"]["principal_id"],
+            json!("dev")
+        );
         assert!(entry.get("assistant_id").is_none());
     }
     assert!(
@@ -399,7 +412,10 @@ async fn a_second_listing_reads_the_same_rows_and_a_newer_run_still_lands_on_top
     assert_eq!(once.len(), 1);
     assert_eq!(once, twice, "a poll reads the same rows");
     assert_eq!(twice[0]["run_id"], json!(first_run));
-    assert_eq!(twice[0]["metadata"]["studio"]["objective"], json!("the first"));
+    assert_eq!(
+        twice[0]["metadata"]["studio"]["objective"],
+        json!("the first")
+    );
 
     // A run finished after the first poll is new to the kept rows: it is
     // computed on the next poll and lists first, the kept row beneath it.

@@ -83,7 +83,11 @@ fn model() -> Arc<dyn ChatModel> {
     Arc::new(MeteredModel {
         script: Mutex::new(
             vec![
-                ChatMessage::assistant_tool_calls(vec![ToolCall::new("c1", "echo", json!({"text": "hello"}))]),
+                ChatMessage::assistant_tool_calls(vec![ToolCall::new(
+                    "c1",
+                    "echo",
+                    json!({"text": "hello"}),
+                )]),
                 ChatMessage::assistant("the echo said: hello"),
             ]
             .into(),
@@ -92,7 +96,11 @@ fn model() -> Arc<dyn ChatModel> {
 }
 
 async fn run_with(budget: Option<RunBudget>) -> (RustyResult<ExecutionOutcome>, Journal) {
-    let journal = Journal::new("run-budget", "t-budget", Clock::logical(1_700_000_000_000, 10));
+    let journal = Journal::new(
+        "run-budget",
+        "t-budget",
+        Clock::logical(1_700_000_000_000, 10),
+    );
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool);
     let graph = create_react_agent(model(), tools).unwrap();
@@ -103,21 +111,31 @@ async fn run_with(budget: Option<RunBudget>) -> (RustyResult<ExecutionOutcome>, 
     if let Some(budget) = budget {
         config = config.with_budget(budget);
     }
-    (executor.run(&graph, &spec(), initial_state(), config).await, journal)
+    (
+        executor.run(&graph, &spec(), initial_state(), config).await,
+        journal,
+    )
 }
 
 #[tokio::test]
 async fn a_run_stops_at_the_boundary_where_its_tokens_cross_the_budget() {
     // 100 tokens: the first model call (60) fits, the second brings the run
     // to 120 — the step that made it is the one the run stops after.
-    let (outcome, journal) = run_with(Some(RunBudget { max_tokens: Some(100), max_cost_usd: None })).await;
+    let (outcome, journal) = run_with(Some(RunBudget {
+        max_tokens: Some(100),
+        max_cost_usd: None,
+    }))
+    .await;
     let error = match outcome {
         Err(error) => error,
         Ok(other) => panic!("expected the budget to stop the run, got {other:?}"),
     };
     assert!(matches!(error, RustyError::Budget(_)), "{error}");
     let text = error.to_string();
-    assert!(text.contains("120 tokens spent against a limit of 100"), "{text}");
+    assert!(
+        text.contains("120 tokens spent against a limit of 100"),
+        "{text}"
+    );
     assert!(text.contains("the run stops here"), "{text}");
 
     // The declaration carries the budget; the model calls are journaled.
@@ -133,18 +151,29 @@ async fn a_run_stops_at_the_boundary_where_its_tokens_cross_the_budget() {
     };
     assert_eq!(output["budget"]["max_tokens"], 100);
     assert_eq!(
-        snapshot.events.iter().filter(|e| e.kind == RunEventKind::ModelCall).count(),
+        snapshot
+            .events
+            .iter()
+            .filter(|e| e.kind == RunEventKind::ModelCall)
+            .count(),
         2
     );
 }
 
 #[tokio::test]
 async fn a_run_under_budget_finishes_and_an_unpriced_model_never_trips_a_cost_bound() {
-    let (outcome, _) = run_with(Some(RunBudget { max_tokens: Some(1000), max_cost_usd: Some(0.0001) })).await;
+    let (outcome, _) = run_with(Some(RunBudget {
+        max_tokens: Some(1000),
+        max_cost_usd: Some(0.0001),
+    }))
+    .await;
     match outcome {
         Ok(ExecutionOutcome::Done(state)) => {
             let messages: Vec<ChatMessage> = state.get_as(MESSAGES_CHANNEL).unwrap().unwrap();
-            assert_eq!(messages.last().unwrap().content.as_deref(), Some("the echo said: hello"));
+            assert_eq!(
+                messages.last().unwrap().content.as_deref(),
+                Some("the echo said: hello")
+            );
         }
         other => panic!("expected Done, got {other:?}"),
     }

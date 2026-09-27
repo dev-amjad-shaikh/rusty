@@ -6,9 +6,9 @@
 //! unbounded deployment says it is open and closes to the hosts in use.
 use std::path::PathBuf;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::connector::{
     ConnectorManifest, ConnectorOperation, HttpMethod, OperationAuth, OperationEffect,
 };
@@ -16,8 +16,8 @@ use rusty_agent_runtime::egress::{
     EgressEndpoint, EgressEndpointPolicy, EgressPolicy, EgressProtocol, EgressRewrite, EgressRule,
     EgressRuleMode,
 };
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 fn temp_store() -> PathBuf {

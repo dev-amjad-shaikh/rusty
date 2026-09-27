@@ -10,13 +10,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::prelude::*;
 use rusty_agent_runtime::tool::builtins::{CalculatorTool, TextInspectorTool};
-use rusty_agent_server::{GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 /// A model that answers at once and keeps every tools argument it was handed.
@@ -150,12 +150,10 @@ async fn the_when_note_reaches_the_model_on_the_tool_and_the_run_declares_it() {
             .iter()
             .find(|t| t["function"]["name"] == "inspect_text")
             .expect("inspector shown");
-        assert!(
-            !inspector["function"]["description"]
-                .as_str()
-                .unwrap()
-                .contains("When to use")
-        );
+        assert!(!inspector["function"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("When to use"));
     }
 
     // The run declared the overlay, so a replay re-derives the same request.

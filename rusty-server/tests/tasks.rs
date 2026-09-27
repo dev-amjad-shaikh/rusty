@@ -122,8 +122,17 @@ async fn full_lifecycle_enqueue_claim_heartbeat_complete() {
     // The payload is kept as given; the platform adds, under keys it owns,
     // who queued the work (and the world, when one was named).
     assert_eq!(task["payload"]["to"], json!("a@b.c"));
-    assert!(task["payload"]["enqueued_by"]["principal_id"].is_string(), "{}", task);
-    assert_eq!(task["payload"].as_object().map(|o| o.len()), Some(2), "nothing else is added: {}", task);
+    assert!(
+        task["payload"]["enqueued_by"]["principal_id"].is_string(),
+        "{}",
+        task
+    );
+    assert_eq!(
+        task["payload"].as_object().map(|o| o.len()),
+        Some(2),
+        "nothing else is added: {}",
+        task
+    );
     assert_eq!(task["pool"], json!("default"));
     assert_eq!(task["status"], json!("leased"));
     assert_eq!(task["attempt"], json!(1));

@@ -5,20 +5,20 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Router;
-use axum::body::{Body, Bytes, to_bytes};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use rusty_agent_runtime::connector::{
     ConnectorManifest, ConnectorOperation, HttpMethod, OperationEffect,
 };
 use rusty_agent_runtime::error::Result as RustyResult;
 use rusty_agent_runtime::llm::Role as ChatRole;
 use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
-use rusty_agent_runtime::react::{MESSAGES_CHANNEL, create_react_agent};
+use rusty_agent_runtime::react::{create_react_agent, MESSAGES_CHANNEL};
 use rusty_agent_runtime::state::{Reducer, StateSpec};
 use rusty_agent_runtime::tool::ToolRegistry;
-use rusty_agent_server::{ConnectionTools, GraphRegistry, ServerConfig, router};
-use serde_json::{Value, json};
+use rusty_agent_server::{router, ConnectionTools, GraphRegistry, ServerConfig};
+use serde_json::{json, Value};
 use tower::ServiceExt;
 
 type Seen = Arc<Mutex<Vec<Vec<ChatMessage>>>>;

@@ -710,11 +710,19 @@ async fn a_declined_version_stays_in_the_lineage_and_activation_clears_the_decli
         &server,
         "POST",
         "/assistants/scout/versions",
-        Some(version_payload(&v1, "Evidence scout", "pipeline", "candidate")),
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "candidate",
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "stage failed: {staged}");
-    let v2 = staged["version"]["version_id"].as_str().unwrap().to_string();
+    let v2 = staged["version"]["version_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // The one that runs cannot be declined.
     let (status, refused) = call(
@@ -740,7 +748,9 @@ async fn a_declined_version_stays_in_the_lineage_and_activation_clears_the_decli
         &server,
         "POST",
         &format!("/assistants/scout/versions/{v2}/decline"),
-        Some(json!({"reason": "the runs are right; the search words are the request's, not fixed"})),
+        Some(
+            json!({"reason": "the runs are right; the search words are the request's, not fixed"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{declined}");
@@ -775,17 +785,35 @@ async fn a_declined_version_stays_in_the_lineage_and_activation_clears_the_decli
     assert_eq!(history["active_version_id"], json!(v1));
     let versions = history["versions"].as_array().unwrap();
     assert_eq!(versions.len(), 2);
-    let listed = versions.iter().find(|v| v["version_id"] == json!(v2)).unwrap();
+    let listed = versions
+        .iter()
+        .find(|v| v["version_id"] == json!(v2))
+        .unwrap();
     assert!(listed["declined"]["reason"].is_string());
-    let active = versions.iter().find(|v| v["version_id"] == json!(v1)).unwrap();
+    let active = versions
+        .iter()
+        .find(|v| v["version_id"] == json!(v1))
+        .unwrap();
     assert!(active.get("declined").is_none());
-    let (_, body) = call(&server, "GET", &format!("/assistants/scout/versions/{v2}"), None).await;
+    let (_, body) = call(
+        &server,
+        "GET",
+        &format!("/assistants/scout/versions/{v2}"),
+        None,
+    )
+    .await;
     assert!(body["version"]["declined"]["reason"].is_string());
 
     // The mark survives a restart of the store.
     let reopened = app(store.clone());
     let (_, history) = call(&reopened, "GET", "/assistants/scout/versions", None).await;
-    let listed = history["versions"].as_array().unwrap().iter().find(|v| v["version_id"] == json!(v2)).cloned().unwrap();
+    let listed = history["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["version_id"] == json!(v2))
+        .cloned()
+        .unwrap();
     assert!(listed["declined"]["reason"].is_string());
 
     // A change of mind: activating the version clears the decline.
@@ -799,11 +827,16 @@ async fn a_declined_version_stays_in_the_lineage_and_activation_clears_the_decli
     assert_eq!(status, StatusCode::OK, "{activated}");
     let (_, history) = call(&reopened, "GET", "/assistants/scout/versions", None).await;
     assert_eq!(history["active_version_id"], json!(v2));
-    let listed = history["versions"].as_array().unwrap().iter().find(|v| v["version_id"] == json!(v2)).cloned().unwrap();
+    let listed = history["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["version_id"] == json!(v2))
+        .cloned()
+        .unwrap();
     assert_eq!(listed["active"], json!(true));
     assert!(listed.get("declined").is_none());
 }
-
 
 /// A working copy edited back to what an earlier version held lands on that
 /// version; when the studio had declined it as superseded, the mark comes
@@ -814,38 +847,121 @@ async fn a_working_copy_that_lands_on_a_superseded_version_revives_it() {
     let server = app(store.clone());
     let created = create_assistant(&server, "scout").await;
     let v1 = created["active_version_id"].as_str().unwrap().to_string();
-    let (_, staged) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "pipeline", "eighteen"))).await;
-    let v2 = staged["version"]["version_id"].as_str().unwrap().to_string();
-    let (_, staged) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "pipeline", "nineteen"))).await;
-    let v3 = staged["version"]["version_id"].as_str().unwrap().to_string();
+    let (_, staged) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "eighteen",
+        )),
+    )
+    .await;
+    let v2 = staged["version"]["version_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, staged) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "nineteen",
+        )),
+    )
+    .await;
+    let v3 = staged["version"]["version_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_ne!(v2, v3);
 
     // The studio marks the older draft superseded when the newer one lands.
-    let (status, _) = call(&server, "POST", &format!("/assistants/scout/versions/{v2}/decline"), Some(json!({"reason": "superseded: the working copy was edited back to an earlier version"}))).await;
+    let (status, _) = call(
+        &server,
+        "POST",
+        &format!("/assistants/scout/versions/{v2}/decline"),
+        Some(
+            json!({"reason": "superseded: the working copy was edited back to an earlier version"}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 
     // Edited back to eighteen: the save lands on v2 and revives it.
-    let (status, landed) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "pipeline", "eighteen"))).await;
+    let (status, landed) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "eighteen",
+        )),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{landed}");
     assert_eq!(landed["created"], json!(false));
     assert_eq!(landed["version"]["version_id"], json!(v2));
     assert_eq!(landed["revived"], json!(true), "{landed}");
     assert!(landed["version"]["declined"].is_null(), "{landed}");
     let (_, history) = call(&server, "GET", "/assistants/scout/versions", None).await;
-    let row = history["versions"].as_array().unwrap().iter().find(|x| x["version_id"] == json!(v2)).unwrap();
+    let row = history["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["version_id"] == json!(v2))
+        .unwrap();
     assert!(row["declined"].is_null(), "{row}");
 
     // Landing again on an undeclined version revives nothing.
-    let (_, again) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "pipeline", "eighteen"))).await;
+    let (_, again) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "eighteen",
+        )),
+    )
+    .await;
     assert_eq!(again["revived"], json!(false));
 
     // A person's decline is a fact: landing on it does not clear it.
-    let (status, _) = call(&server, "POST", &format!("/assistants/scout/versions/{v3}/decline"), Some(json!({"reason": "the runs are right; nineteen is wrong"}))).await;
+    let (status, _) = call(
+        &server,
+        "POST",
+        &format!("/assistants/scout/versions/{v3}/decline"),
+        Some(json!({"reason": "the runs are right; nineteen is wrong"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, landed) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "pipeline", "nineteen"))).await;
+    let (_, landed) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(
+            &v1,
+            "Evidence scout",
+            "pipeline",
+            "nineteen",
+        )),
+    )
+    .await;
     assert_eq!(landed["created"], json!(false));
     assert_eq!(landed["revived"], json!(false), "{landed}");
-    assert_eq!(landed["version"]["declined"]["reason"], json!("the runs are right; nineteen is wrong"));
+    assert_eq!(
+        landed["version"]["declined"]["reason"],
+        json!("the runs are right; nineteen is wrong")
+    );
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -861,9 +977,18 @@ async fn the_listing_says_who_proposed_a_version_so_every_proposal_is_found() {
     // reader that only opened the newest few versions in full would miss it.
     let mut proposal = version_payload(&v1, "Evidence scout", "canary", "candidate");
     proposal["metadata"] = json!({"proposed_by": {"kind": "coach", "name": "Coach"}, "reason": "read before you answer"});
-    let (status, landed) = call(&server, "POST", "/assistants/scout/versions", Some(proposal)).await;
+    let (status, landed) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(proposal),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{landed}");
-    let proposed = landed["version"]["version_id"].as_str().unwrap().to_string();
+    let proposed = landed["version"]["version_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     for n in 0..8 {
         let draft = version_payload(&v1, "Evidence scout", "canary", &format!("candidate-{n}"));
         let (status, _) = call(&server, "POST", "/assistants/scout/versions", Some(draft)).await;
@@ -874,11 +999,17 @@ async fn the_listing_says_who_proposed_a_version_so_every_proposal_is_found() {
     assert_eq!(status, StatusCode::OK);
     let rows = history["versions"].as_array().unwrap();
     assert_eq!(rows.len(), 10);
-    let marked: Vec<&Value> = rows.iter().filter(|r| r.get("proposed_by").is_some()).collect();
+    let marked: Vec<&Value> = rows
+        .iter()
+        .filter(|r| r.get("proposed_by").is_some())
+        .collect();
     assert_eq!(marked.len(), 1, "{history}");
     assert_eq!(marked[0]["version_id"], json!(proposed));
     assert_eq!(marked[0]["proposed_by"], json!("Coach"));
-    assert!(rows.iter().filter(|r| r["version_id"] != json!(proposed)).all(|r| r.get("proposed_by").is_none()));
+    assert!(rows
+        .iter()
+        .filter(|r| r["version_id"] != json!(proposed))
+        .all(|r| r.get("proposed_by").is_none()));
 
     let _ = std::fs::remove_dir_all(store);
 }
@@ -890,27 +1021,52 @@ async fn open_proposals_are_listed_across_agents_until_declined() {
     let scout = create_assistant(&server, "scout").await;
     let v1 = scout["active_version_id"].as_str().unwrap().to_string();
     // A plain working-copy save and a Coach proposal above the active version.
-    let (status, _) = call(&server, "POST", "/assistants/scout/versions", Some(version_payload(&v1, "Evidence scout", "canary", "draft"))).await;
+    let (status, _) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(version_payload(&v1, "Evidence scout", "canary", "draft")),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     let mut proposal = version_payload(&v1, "Evidence scout", "canary", "candidate");
     proposal["metadata"] = json!({"proposed_by": {"kind": "service", "name": "Coach"}, "why": "read the record before you answer"});
-    let (status, landed) = call(&server, "POST", "/assistants/scout/versions", Some(proposal)).await;
+    let (status, landed) = call(
+        &server,
+        "POST",
+        "/assistants/scout/versions",
+        Some(proposal),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{landed}");
     let proposed = landed["version"]["version_id"].as_str().unwrap().to_owned();
 
     let (status, listed) = call(&server, "GET", "/proposals", None).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     let rows = listed["proposals"].as_array().unwrap();
-    assert_eq!(rows.len(), 1, "the working-copy save is not a proposal: {listed}");
+    assert_eq!(
+        rows.len(),
+        1,
+        "the working-copy save is not a proposal: {listed}"
+    );
     assert_eq!(rows[0]["assistant_id"], "scout");
     assert_eq!(rows[0]["version_id"], json!(proposed));
     assert_eq!(rows[0]["proposed_by"], "Coach");
     assert_eq!(rows[0]["why"], "read the record before you answer");
 
     // Declined, it leaves the inbox.
-    let (status, declined) = call(&server, "POST", &format!("/assistants/scout/versions/{proposed}/decline"), Some(json!({"reason": "the runs are right"}))).await;
+    let (status, declined) = call(
+        &server,
+        "POST",
+        &format!("/assistants/scout/versions/{proposed}/decline"),
+        Some(json!({"reason": "the runs are right"})),
+    )
+    .await;
     assert!(status.is_success(), "{declined}");
     let (_, listed) = call(&server, "GET", "/proposals", None).await;
-    assert!(listed["proposals"].as_array().unwrap().is_empty(), "{listed}");
+    assert!(
+        listed["proposals"].as_array().unwrap().is_empty(),
+        "{listed}"
+    );
     let _ = std::fs::remove_dir_all(store);
 }

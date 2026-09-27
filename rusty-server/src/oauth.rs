@@ -503,23 +503,40 @@ mod ceiling_tests {
         let cell = SharedCeiling::default();
         let provider = ReqwestOAuthProvider::under(std::sync::Arc::clone(&cell));
         let failure = provider
-            .grant("https://login.example.com/oauth/token", vec![("grant_type", "client_credentials")])
+            .grant(
+                "https://login.example.com/oauth/token",
+                vec![("grant_type", "client_credentials")],
+            )
             .await
             .unwrap_err();
         assert!(failure.permanent);
-        assert!(failure.detail.contains("login.example.com") && failure.detail.contains("egress ceiling"), "{}", failure.detail);
+        assert!(
+            failure.detail.contains("login.example.com")
+                && failure.detail.contains("egress ceiling"),
+            "{}",
+            failure.detail
+        );
 
         // Listed: the endpoint under the ceiling is admitted, another is not.
         {
             let mut ceiling = cell.write().unwrap();
-            ceiling.hosts.push(CeilingHost { host: "*.example.com".to_owned(), added_by: serde_json::json!({"kind": "test"}), added_at: chrono::Utc::now(), note: None });
+            ceiling.hosts.push(CeilingHost {
+                host: "*.example.com".to_owned(),
+                added_by: serde_json::json!({"kind": "test"}),
+                added_at: chrono::Utc::now(),
+                note: None,
+            });
         }
-        assert!(provider.admitted("https://login.example.com/oauth/token").is_ok());
+        assert!(provider
+            .admitted("https://login.example.com/oauth/token")
+            .is_ok());
         assert!(provider.admitted("https://login.other.net/token").is_err());
 
         // Open: anything is admitted; a provider without a ceiling likewise.
         cell.write().unwrap().open = true;
         assert!(provider.admitted("https://login.other.net/token").is_ok());
-        assert!(ReqwestOAuthProvider::new().admitted("https://anything.example/token").is_ok());
+        assert!(ReqwestOAuthProvider::new()
+            .admitted("https://anything.example/token")
+            .is_ok());
     }
 }

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use rusty_agent_runtime::capability::PermissionPreset;
 use rusty_agent_runtime::error::{Result, RustyError};
@@ -17,7 +17,7 @@ use rusty_agent_runtime::llm::{ChatMessage, ChatModel, ChatResponse, ToolCall};
 use rusty_agent_runtime::middleware::{Decision, InterceptPoint, Middleware, ToolInvocation};
 use rusty_agent_runtime::record::Effect;
 use rusty_agent_runtime::reviewer::{
-    ExecReviewer, REVIEWER_MAX_TOKENS, REVIEWER_TIMEOUT_SECS, ReviewerDecision, ReviewerResponse,
+    ExecReviewer, ReviewerDecision, ReviewerResponse, REVIEWER_MAX_TOKENS, REVIEWER_TIMEOUT_SECS,
 };
 use rusty_agent_runtime::tool::ToolRegistry;
 

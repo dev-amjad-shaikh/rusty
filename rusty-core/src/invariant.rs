@@ -448,7 +448,6 @@ impl ChatModel for CheckingChatModel {
         self.inner.effect()
     }
 
-
     fn pricing(&self) -> Option<crate::llm::ModelPricing> {
         self.inner.pricing()
     }

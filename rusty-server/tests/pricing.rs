@@ -21,7 +21,11 @@ struct Quiet;
 #[async_trait::async_trait]
 impl ChatModel for Quiet {
     async fn chat(&self, _m: &[ChatMessage], _t: &[Value]) -> RustyResult<ChatResponse> {
-        Ok(ChatResponse { message: ChatMessage::assistant("noted"), model: Some("quiet".into()), usage: None })
+        Ok(ChatResponse {
+            message: ChatMessage::assistant("noted"),
+            model: Some("quiet".into()),
+            usage: None,
+        })
     }
 }
 
@@ -30,8 +34,13 @@ fn app(store: &std::path::Path) -> Router {
     let graph = create_react_agent(Arc::new(Quiet), tools.clone()).unwrap();
     let spec = StateSpec::new().channel(MESSAGES_CHANNEL, Reducer::AddMessages);
     let mut registry = GraphRegistry::new();
-    registry.register_with_tools("react_agent", graph, spec, &tools).unwrap();
-    router(registry, ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf()))
+    registry
+        .register_with_tools("react_agent", graph, spec, &tools)
+        .unwrap();
+    router(
+        registry,
+        ServerConfig::new("127.0.0.1:0".parse().unwrap(), store.to_path_buf()),
+    )
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -43,10 +52,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -61,7 +77,12 @@ async fn a_providers_three_prices_are_kept_and_served_and_cached_tokens_bill_at_
     assert!(status.is_success(), "{saved}");
     let (status, served) = call(&app, "GET", "/llm/providers", None).await;
     assert_eq!(status, StatusCode::OK, "{served}");
-    let fw = served["providers"].as_array().unwrap().iter().find(|p| p["id"] == "fw").expect("the provider");
+    let fw = served["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "fw")
+        .expect("the provider");
     assert_eq!(fw["price_input_per_m"], json!(1.40));
     assert_eq!(fw["price_output_per_m"], json!(4.40));
     assert_eq!(fw["price_cached_input_per_m"], json!(0.14), "{fw}");
@@ -69,8 +90,20 @@ async fn a_providers_three_prices_are_kept_and_served_and_cached_tokens_bill_at_
     // The rate the client bills with: a prompt three-quarters served from
     // the cache costs a fraction of the same prompt cold.
     let pricing = ModelPricing::new(1.40, 4.40).with_cached_input(0.14);
-    let cold = pricing.cost_usd(&Usage { prompt_tokens: 4_000, completion_tokens: 100, total_tokens: 4_100, cached_tokens: None, reasoning_tokens: None });
-    let warm = pricing.cost_usd(&Usage { prompt_tokens: 4_000, completion_tokens: 100, total_tokens: 4_100, cached_tokens: Some(3_000), reasoning_tokens: None });
+    let cold = pricing.cost_usd(&Usage {
+        prompt_tokens: 4_000,
+        completion_tokens: 100,
+        total_tokens: 4_100,
+        cached_tokens: None,
+        reasoning_tokens: None,
+    });
+    let warm = pricing.cost_usd(&Usage {
+        prompt_tokens: 4_000,
+        completion_tokens: 100,
+        total_tokens: 4_100,
+        cached_tokens: Some(3_000),
+        reasoning_tokens: None,
+    });
     assert!((cold - (4_000.0 * 1.40 + 100.0 * 4.40) / 1e6).abs() < 1e-9);
     assert!((warm - (1_000.0 * 1.40 + 3_000.0 * 0.14 + 100.0 * 4.40) / 1e6).abs() < 1e-9);
     assert!(warm < cold / 2.0, "cold {cold} warm {warm}");
