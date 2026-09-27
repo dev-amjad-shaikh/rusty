@@ -190,17 +190,24 @@ async fn restart_restores_queued_runs_in_fifo_order() {
     // window is the boot instant itself — not pollable — but server A
     // already proved its pending state above).
     assert_eq!(seq_of("run3"), ["pending", "running", "success"]);
-    // FIFO: run2 finished before run3 ever started — at most one active
-    // run per thread, drained in enqueue order.
-    let run2_done = events
-        .iter()
-        .position(|e| e == &("run2".to_string(), "success".to_string()));
-    let run3_ran = events
-        .iter()
-        .position(|e| e == &("run3".to_string(), "running".to_string()));
+    // FIFO: run2's execution window opened before run3's, and run2's
+    // completion was observed before run3's. Comparing run2's `success`
+    // against run3's `running` is unsound — `finish` flips both statuses
+    // atomically under one lock, and the poller (run2 first, then run3)
+    // can record run3's `running` one slot before run2's `success`:
+    // observation order, not transition order.
+    let pos = |label: &str, status: &str| {
+        events
+            .iter()
+            .position(|e| e == &(label.to_string(), status.to_string()))
+    };
     assert!(
-        run2_done < run3_ran,
-        "run3 started before run2 finished: {events:?}"
+        pos("run2", "running") < pos("run3", "running"),
+        "run3 started before run2: {events:?}"
+    );
+    assert!(
+        pos("run2", "success") < pos("run3", "success"),
+        "run3 finished before run2: {events:?}"
     );
 
     drop(app_b);
