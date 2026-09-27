@@ -247,7 +247,8 @@ snapshot, so cloning is on the hot path. Measured: a 1 MB state clones in
   (server-level load suite against `rusty-agent-server`, including
   `PostgresCheckpointer` under concurrent writers).
 - No cross-machine or cross-OS comparison; no regression history (this is the
-  baseline run); no memory-usage or allocation profiling; no comparison
+  baseline run); no memory-usage or allocation profiling (covered later by
+  the durability-economics wave below, 2026-09-26); no comparison
   against LangGraph or other runtimes.
 - Criterion measures wall-clock latency of single operations; throughput
   under contention can behave differently.
@@ -1096,6 +1097,134 @@ tier (asserted separately against `assemble()`).
 > status and eval scores. The vector question stays deferred — by
 > measurement, not by fiat.**
 
+
+## Durability economics — checkpoint overhead, RSS growth, resume-vs-restart (2026-09-26)
+
+The baseline suite above measured the pieces (`benches/checkpoint.rs`,
+`benches/interrupt_resume.rs`) and explicitly scoped out memory profiling.
+This wave measures the three questions a production adopter actually asks,
+end to end through the executor, with one harness:
+
+- **What does durability cost per super-step?** (wall-clock, end to end)
+- **What does a long run cost in process memory?** (RSS vs super-step count,
+  attributed across checkpointer backends)
+- **What does resume save?** (byte-exact model spend: resume from a
+  checkpoint vs restart from scratch after a lost process)
+
+Harness: `rusty-core/examples/durability_bench.rs`, driven by
+`./scripts/durability-bench.sh --json target/durability-bench.json`. All
+experiments are offline and deterministic — a scripted `ChatModel` with
+byte-exact accounting replaces the network, so every number reproduces
+exactly. Sizes are tunable via `DURABILITY_BENCH_CHAIN`, `_REPS`,
+`_RSS_STEPS`, `_ECON_STEPS`, `_MSG_BYTES`, `_INTERRUPT_AT`; the B probes
+need fresh processes per configuration (`DURABILITY_BENCH_ONLY=b-events`,
+`b-noevents`) because macOS malloc retains a process's RSS peak. A dev
+tool, not a CI gate — same posture as the capacity envelope below.
+
+### Environment
+
+Same machine as the baseline run: Apple M2 Max (12 cores), 96 GB, macOS
+(build 25F80 line), rustc 1.97.1. Crate `rusty-agent-runtime` 0.12.0.
+**Release profile** (the baseline Criterion numbers are also release).
+
+### A — Checkpoint overhead per super-step (end to end)
+
+200-node linear chain (same shape as the baseline chain benchmark), three
+configurations, min wall-clock over 3 reps divided by super-steps:
+
+| Checkpointer | µs / super-step | Overhead vs none |
+|---|---|---|
+| none | 54.3 | — |
+| `InMemoryCheckpointer` | 64.1 | +9.8 µs |
+| `JsonFileCheckpointer` | 517.5 | +463.2 µs |
+
+The file backend's +463 µs matches the baseline microbenchmark of
+`JsonFileCheckpointer::put` (~450–600 µs of atomic-write filesystem work)
+— end to end, the prediction held. Against any node that calls an LLM
+(hundreds of ms), even the file backend is three orders of magnitude
+below the work it protects.
+
+### B — RSS vs super-steps
+
+300-step self-loop graph; each step appends a 256-byte user message and a
+256-byte assistant reply to one `Overwrite` channel (the transcript), so
+the state grows linearly and every step clones it whole — deliberately the
+naive accumulation pattern. The node samples the process's own RSS every
+25 steps (`ps`, works on macOS and Linux). Three checkpointer backends,
+fresh process each:
+
+| Checkpointer backend | RSS at step 0 | RSS at step 299 | Growth |
+|---|---|---|---|
+| none | 7.0 MB | 189.6 MB | +182.6 MB |
+| `InMemoryCheckpointer` | 7.1 MB | 277.1 MB | +270.0 MB |
+| `JsonFileCheckpointer` | 7.0 MB | 190.1 MB | +183.1 MB |
+
+Growth is accelerating, not linear: 7.0 → 30.6 → 91.9 → 189.6 MB at steps
+0/100/200/299 — consistent with per-step full-state clones (snapshot
+isolation, the node's own transcript clone, serde churn) on a state that
+itself grows linearly. Attribution:
+
+- **Durable persistence is free in RSS.** The file backend lands within
+  0.5 MB of no checkpointer at every step; its cost is the +463 µs of
+  wall-clock in experiment A, not memory.
+- **The in-memory backend retains what it must**: +87.4 MB over none ≈
+  300 checkpoints of the growing transcript. That is the trade it
+  documents — process memory for instant resume.
+- **The event channel is not a factor.** With the `GraphEvent` stream
+  attached vs detached, fresh-process curves are indistinguishable
+  (±1 MB across the whole run).
+- **On disk**, the file backend's checkpoint trail totals 29.2 MB for
+  this run (~97 KB/checkpoint average — later checkpoints are bigger
+  because the state is).
+
+### C — Resume vs restart, byte-exact
+
+48 model calls over the same self-loop graph, interrupted at step N. The
+scripted model counts exact serialized-context input bytes and response
+output bytes per call. Three paths, determinism asserted in the harness:
+a restart reproduces the full run byte-for-byte (same calls, same bytes),
+and both phases of the resume path hit their exact call counts (N before
+the park, 48 − N after, including the re-run of the parked step — resume
+re-executes the interrupted node, and that duplicate call stays in the
+count).
+
+Full run spend: 48 calls, 674,616 bytes ≈ 168.7 k tokens at the bytes/4
+heuristic (the scripted model has no tokenizer; bytes are the exact unit,
+tokens are the labeled estimate).
+
+| Interrupted at step | Resume pays after the crash (bytes) | Restart pays (bytes) | Savings |
+|---|---|---|---|
+| 12 | 630,162 | 674,616 | 6.6 % |
+| 24 | 502,908 | 674,616 | 25.5 % |
+| 36 | 292,854 | 674,616 | 56.6 % |
+
+### Interpretation
+
+- **Durability is cheap to keep and expensive to lose.** Keeping
+  checkpoints costs +10 µs (memory) or +463 µs (file) per super-step and
+  ≈0 process memory (file). Losing a process halfway through this run and
+  restarting cost 674,616 bytes of repeated model context that resume
+  would have reduced to 502,908 — and the deeper the park point, the
+  steeper the saving, because context grows superlinearly: work already
+  done is disproportionately the *cheap* part of a run. The honest
+  one-liner for the README claim: **resume saves the prefix, and the
+  prefix is where the cheap calls live** — 6.6 % saved at ¼ depth, 56.6 %
+  at ¾.
+- **The real scaling hazard is unbounded per-step cloning, not
+  checkpointing.** +183 MB of allocator-retained churn over 300 steps on a
+  300 KB final state is the same family as the `Reducer::Append` hazard in
+  the baseline: any pattern that clones or merges a growing whole every
+  super-step pays its size every super-step, and the allocator keeps the
+  peak. Bounded channels and context policies are the mitigation; this
+  measurement is the baseline those mitigations will be judged against.
+
+### Verdict
+
+The durability story holds under measurement: checkpoint overhead is
+noise next to an LLM call, the file backend adds no memory pressure, and
+resume saves a real, growing fraction of model spend as runs get longer.
+Shipped with the harness so every number here is reproducible from
+`./scripts/durability-bench.sh`.
 
 ## Capacity envelope (R1.0)
 
