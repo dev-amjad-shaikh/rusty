@@ -169,6 +169,7 @@ Step-by-step guides to everything above — building an agent, a skill, a tool, 
 
 ## Documentation
 
+- [docs/building-agentic-products.md](docs/building-agentic-products.md) — what Rusty is precisely, the five-concept mental model, and the product-building path from local graph to deployed binary.
 - [docs/architecture.md](docs/architecture.md) — the anatomy deep-dive: how one run flows through the engine, eight diagrams, the named failure modes.
 - [docs/how-to.md](docs/how-to.md) — build an agent, a skill, a tool, and add a connector, step by step, in Rusty Studio.
 - [docs/server-quickstart.md](docs/server-quickstart.md) — zero to a served graph with interrupt/resume over HTTP in ten minutes.
@@ -177,7 +178,6 @@ Step-by-step guides to everything above — building an agent, a skill, a tool, 
 - [docs/versioning.md](docs/versioning.md) — independent per-package versioning and which version governs which compatibility boundary.
 - [docs/stability.md](docs/stability.md) — stability guarantees and deprecation policy per package.
 - [rusty-core/examples/](rusty-core/examples/) — `react_agent`, `parallel_fanout`, `human_in_loop`, `live_agent`.
-- [docs/studio.md](docs/studio.md) — the debug UI.
 
 ## Contributing & license
 
