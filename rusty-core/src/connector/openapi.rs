@@ -39,8 +39,9 @@ pub struct UnmappedOperation {
 pub enum OperationDiff {
     /// An operation present in the new import but absent in the old.
     Added {
-        /// The operation that was added.
-        operation: ConnectorOperation,
+        /// The operation that was added. Boxed so the diff stays small
+        /// next to the name/method/path-only variants.
+        operation: Box<ConnectorOperation>,
     },
     /// An operation present in the old import but absent in the new.
     Removed {
@@ -133,7 +134,7 @@ pub fn diff_imports(old: &OpenApiImport, new: &OpenApiImport) -> Vec<OperationDi
     for (key, new_op) in &new_by_key {
         if !old_by_key.contains_key(key) {
             diffs.push(OperationDiff::Added {
-                operation: (*new_op).clone(),
+                operation: Box::new((*new_op).clone()),
             });
         }
     }

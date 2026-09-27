@@ -13,7 +13,7 @@
 //! [`Tool`] contract: the schema the model sees, the effect class the runtime
 //! admits on, and the arguments-to-template binding.
 //!
-//! Read operations only, for now. [`CheckRequest`] carries no body, so a write
+//! Read operations only, for now. [`CheckRequest`](crate::connector::check::CheckRequest) carries no body, so a write
 //! cannot be expressed through this seam; [`ConnectorMethodTool::for_manifest`]
 //! skips the manifest's check operation (a gate, not an action) rather than
 //! pretending a write is available.

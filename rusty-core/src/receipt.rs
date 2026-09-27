@@ -231,7 +231,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// input. Local to receipts: the crate hashes often but decodes hex only
 /// here, at the key/signature boundary.
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     (0..hex.len())

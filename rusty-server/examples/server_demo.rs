@@ -19,6 +19,10 @@
 //! the same store. `RUSTY_DEMO_STAGE_DELAY_MS` overrides the `deep-dive`
 //! stage delay (default 75 000 ms) so automated proofs don't wait minutes.
 
+// The demo returns `Result<()>` with the runtime's error type, which
+// exceeds clippy's 128-byte `Err` threshold under `--all-features` (see
+// the crate roots); an example binary is its own crate root.
+#![allow(clippy::result_large_err)]
 use std::sync::Arc;
 
 use async_trait::async_trait;

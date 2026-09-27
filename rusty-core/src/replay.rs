@@ -270,7 +270,7 @@ pub struct ServedEffect {
     pub output: Option<Value>,
 
     /// Gate evidence recorded inside this effect's execution (see
-    /// [`NESTED_EVIDENCE_KINDS`]), re-journaled alongside the served effect
+    /// `NESTED_EVIDENCE_KINDS`), re-journaled alongside the served effect
     /// because the gated call never re-executes. Empty for every effect
     /// journaled before the approval wave.
     pub nested: Vec<ServedEffect>,
@@ -488,7 +488,7 @@ impl ReplaySource {
 
     /// Recorded seqs of gate evidence exact replay can neither serve nor
     /// re-derive (not nested immediately before a servable effect; see
-    /// [`NESTED_EVIDENCE_KINDS`]). Empty for every journal the replay
+    /// `NESTED_EVIDENCE_KINDS`). Empty for every journal the replay
     /// boundary should accept.
     pub fn stray_nested(&self) -> Vec<u64> {
         self.lock().stray.clone()
@@ -1015,7 +1015,7 @@ impl ExactReplay {
     /// Fails with [`RustyError::Replay`] when the snapshot fails integrity
     /// verification (tampered head hash, corrupted artifacts, dangling
     /// references), when the journal carries gate evidence exact replay can
-    /// neither serve nor re-derive (see [`NESTED_EVIDENCE_KINDS`]), or with
+    /// neither serve nor re-derive (see `NESTED_EVIDENCE_KINDS`), or with
     /// [`RustyError::Serialization`] when an event cannot be re-hashed.
     /// Exact replay of *resumed* runs (journals holding a resume event) is
     /// deferred: their evidence continues mid-run against checkpointed state

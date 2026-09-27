@@ -34,6 +34,10 @@
 //! Run with: `cargo run --release --example durability_bench`
 //! (or `./scripts/durability-bench.sh --json target/durability-bench.json`)
 
+// The example returns `Result<()>` with the runtime's error type; that type
+// exceeds clippy's 128-byte `Err` threshold under `--all-features` (see the
+// crate root), and an example binary is its own crate root.
+#![allow(clippy::result_large_err)]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -153,7 +157,7 @@ fn transcript_graph(
         let resumed = resumed.clone();
         let rss_log = rss_log_for_node.clone();
         async move {
-            if ctx.step() % 25 == 0 || ctx.step() + 1 >= total_steps {
+            if ctx.step().is_multiple_of(25) || ctx.step() + 1 >= total_steps {
                 if let Some(kb) = self_rss_kb() {
                     rss_log.lock().unwrap().push((ctx.step(), kb));
                 }

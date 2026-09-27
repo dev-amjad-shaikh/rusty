@@ -698,7 +698,7 @@ pub(crate) struct RegisterSkillPayload {
 
 /// Decode one hex string (either case) into bytes.
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return Err("hex values must have an even length".to_owned());
     }
     let digit = |byte: u8| -> Result<u8, String> {

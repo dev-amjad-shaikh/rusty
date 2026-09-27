@@ -1,6 +1,6 @@
 //! The connector surface's server half (schema-driven configuration,
 //! `docs/connector-surface-design.md`): the file layout behind
-//! `server_store.rs`'s [`ConnectorPlane`], the `/connectors/*` HTTP
+//! `server_store.rs`'s `ConnectorPlane`, the `/connectors/*` HTTP
 //! surface, the real check transport, and the secret-sealing bridge to
 //! the credential broker.
 //!
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! `scoped_*` keys are tenant-scoped (`{tenant}/{id}` for named tenants,
-//! bare for the default tenant — [`crate::auth::scope_id`]), so the
+//! bare for the default tenant — `crate::auth::scope_id`), so the
 //! surface is tenant-isolated at the storage layer: cross-tenant reads
 //! are indistinguishable from absence, and the HTTP surface answers them
 //! `404` — never `403`.
@@ -24,7 +24,7 @@
 //! **Secrets.** Registration validates the config against the manifest's
 //! `connection_specification` (a rejection is a 422 naming the failing
 //! schema path), then extracts every `rusty_secret` field and seals it
-//! through the broker ([`Broker::seal_connector_secret`]) under the
+//! through the broker (`Broker::seal_connector_secret`) under the
 //! tenant-scoped instance id as associated data. The persisted record
 //! holds the non-secret config plus the sealed envelopes — ciphertext
 //! only, so a store leak is not a credential leak. Secrets open
@@ -2262,8 +2262,9 @@ impl Binding {
     }
 }
 
-/// The tools of every configured connection, as a live [`ToolSource`] the
-/// `react_agent` registry is built over. Empty until the server fills it.
+/// The tools of every configured connection, as a live
+/// [`ToolSource`](rusty_agent_runtime::tool::ToolSource) the `react_agent`
+/// registry is built over. Empty until the server fills it.
 #[derive(Default)]
 pub struct ConnectionTools {
     tools: std::sync::RwLock<Vec<Arc<dyn rusty_agent_runtime::tool::Tool>>>,

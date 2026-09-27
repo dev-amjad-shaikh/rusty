@@ -41,6 +41,10 @@
 //!    run reproduces the defect run's output and node-output events
 //!    exactly.
 
+// The proof returns `Result<()>` with the runtime's error type, which
+// exceeds clippy's 128-byte `Err` threshold under `--all-features` (see
+// the crate roots); a test file is its own crate root.
+#![allow(clippy::result_large_err)]
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 

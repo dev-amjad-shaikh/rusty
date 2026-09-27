@@ -74,7 +74,7 @@ fn non_idempotent_stride(density: f64) -> usize {
 /// on every `1/density`-th step (evenly spread, deterministic), ReadOnly on
 /// every fifth remaining step, Pure otherwise.
 fn super_step_effect(density: f64, step: usize) -> Effect {
-    if step % non_idempotent_stride(density) == 0 {
+    if step.is_multiple_of(non_idempotent_stride(density)) {
         Effect::NonIdempotent
     } else if step % READ_ONLY_STRIDE == READ_ONLY_STRIDE - 1 {
         Effect::ReadOnly
@@ -122,7 +122,7 @@ impl Placement {
             Placement::TerminalOnly => step + 1 == chain_len,
             Placement::MandatoryOnly => effect == Effect::NonIdempotent,
             Placement::MandatoryPeriodic => {
-                effect == Effect::NonIdempotent || (step + 1) % PERIODIC_K == 0
+                effect == Effect::NonIdempotent || (step + 1).is_multiple_of(PERIODIC_K)
             }
         }
     }

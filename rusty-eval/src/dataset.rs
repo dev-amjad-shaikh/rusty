@@ -41,8 +41,9 @@ enum DatasetLine {
         /// or expectation change).
         version: String,
     },
-    /// One evaluation case.
-    Case(EvalCase),
+    /// One evaluation case. Boxed so the line enum stays the size of its
+    /// header variant.
+    Case(Box<EvalCase>),
 }
 
 /// One evaluation case: an input payload plus what a correct run looks like.
@@ -351,7 +352,7 @@ impl Dataset {
                             "line {line_no}: case before the header"
                         )));
                     }
-                    cases.push(case);
+                    cases.push(*case);
                 }
             }
         }
@@ -381,7 +382,7 @@ impl Dataset {
         out.push('\n');
         for case in &self.cases {
             out.push_str(
-                &serde_json::to_string(&DatasetLine::Case(case.clone()))
+                &serde_json::to_string(&DatasetLine::Case(Box::new(case.clone())))
                     .expect("dataset case serializes"),
             );
             out.push('\n');

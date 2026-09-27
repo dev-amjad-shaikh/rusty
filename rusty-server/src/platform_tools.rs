@@ -1083,7 +1083,7 @@ fn cadence_words(interval_secs: Option<u64>, cron_expr: Option<&str>) -> String 
         ("hour", 3_600),
         ("minute", 60),
     ] {
-        if secs % size == 0 {
+        if secs.is_multiple_of(size) {
             let n = secs / size;
             return if n == 1 {
                 format!("every {word}")

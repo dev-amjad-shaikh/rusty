@@ -11,8 +11,8 @@
 //!
 //! # The two-tier failure contract (N10)
 //!
-//! A journaled [`RunEventKind::ToolCall`]'s outcome is classified by
-//! **payload, never by status alone**:
+//! A journaled [`RunEventKind::ToolCall`](crate::record::RunEventKind)'s
+//! outcome is classified by **payload, never by status alone**:
 //!
 //! - **Structured refusals** — [`crate::tool_select::ValidatingTool`]
 //!   returns its violation payload as an ordinary `Ok` result, so a refusal

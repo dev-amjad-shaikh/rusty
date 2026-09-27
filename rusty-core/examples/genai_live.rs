@@ -18,6 +18,12 @@
 //!
 //! # Run it (manual validation only — never in CI)
 //!
+//!
+// The demo returns `Result<()>` with the runtime's error type; that type
+// exceeds clippy's 128-byte `Err` threshold under `--all-features` (see the
+// crate root), and an example binary is its own crate root.
+#![allow(clippy::result_large_err)]
+//!
 //! ```text
 //! OPENAI_API_KEY=sk-...  cargo run --example genai_live --features genai
 //! ANTHROPIC_API_KEY=...  GENAI_MODEL=claude-haiku-4-5 \

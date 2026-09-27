@@ -6,8 +6,10 @@
 //!
 //! The design doc is `docs/agent-core-design.md` ("Memory organization",
 //! "Memory optimization"). Everything here **composes** `memory.rs` — the
-//! record model, [`assemble`], [`JournaledMemory`], [`plan_forget`],
-//! [`detect_conflicts`], [`consolidation_summary`] are consumed unchanged;
+//! record model, [`assemble`], [`JournaledMemory`],
+//! [`plan_forget`](crate::memory::plan_forget),
+//! [`detect_conflicts`](crate::memory::detect_conflicts),
+//! [`consolidation_summary`](crate::memory::consolidation_summary) are consumed unchanged;
 //! nothing in this module mutates a record, adds a journal event kind, or
 //! re-opens a shipped contract.
 //!
@@ -21,8 +23,9 @@
 //! Classification is a pure function of `(scope, kind)`
 //! ([`MemoryTier::classify`]): tiers shape assembly, never storage, and
 //! promotion between tiers is consolidation — a distillation hop through
-//! the shipped [`consolidation_summary`], naming its sources so the shipped
-//! [`plan_forget`] transitive invalidation walks the chain.
+//! the shipped [`consolidation_summary`](crate::memory::consolidation_summary),
+//! naming its sources so the shipped
+//! [`plan_forget`](crate::memory::plan_forget) transitive invalidation walks the chain.
 //!
 //! # Key grammar and the write gate
 //!
@@ -35,7 +38,7 @@
 //! the content address moves), and the same key ends up held by two records
 //! saying the same thing. The rule (the design's dedup section): **same
 //! scope, same key, content-equal-up-to-normalization** — canonical-content
-//! hash equality, the same equality [`detect_conflicts`] uses — **converges
+//! hash equality, the same equality [`detect_conflicts`](crate::memory::detect_conflicts) uses — **converges
 //! onto the existing record's id**. Same key, *different* content is not
 //! dedup: it is supersession or a flagged conflict, unchanged.
 //!

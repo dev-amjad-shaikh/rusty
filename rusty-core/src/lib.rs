@@ -241,6 +241,14 @@
 //! # }
 //! ```
 
+// `RustyError` is the one error type for the whole crate and is deliberately
+// not boxed: it crosses the public API of every module, and its feature-gated
+// variants (capsules, genai, postgres, wasm) push it past clippy's 128-byte
+// `Err` threshold under `--all-features`. Per-site allows would number in the
+// hundreds; shrinking the type is a 1.0-track refactor, tracked with the
+// core decomposition.
+#![allow(clippy::result_large_err)]
+
 pub mod a2a;
 pub mod agents;
 pub mod allowlist;

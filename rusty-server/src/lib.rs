@@ -173,6 +173,12 @@
 //! failure stops the run before it starts) and journaled ahead of the
 //! run's own events, so the evidence names exactly what served.
 
+// Many helpers here return `rusty_agent_runtime::error::Result`, and that
+// type exceeds clippy's 128-byte `Err` threshold under `--all-features`
+// (see the runtime crate root for why it is not boxed). Per-site allows
+// would number in the dozens; the decision belongs to the runtime.
+#![allow(clippy::result_large_err)]
+
 mod a2a;
 mod agents;
 mod approvals;
@@ -633,7 +639,8 @@ pub struct ServerConfig {
     pub bootstrap_admin: bool,
 
     /// Whether this process is serving production. Set from
-    /// `RUSTY_ENV=production` by [`ServerConfig::from_env`], or explicitly.
+    /// `RUSTY_ENV=production` by [`ServerConfig::production_from_env`], or
+    /// explicitly.
     /// A production server refuses to start without authentication — an
     /// open deployment is a decision nobody makes on purpose (G12).
     pub production: bool,

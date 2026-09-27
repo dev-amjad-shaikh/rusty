@@ -18,7 +18,7 @@
 //! ```
 //!
 //! `scoped_*` keys are tenant-scoped (`{tenant}/{id}` for named tenants,
-//! bare for the default tenant — [`crate::auth::scope_id`]), so the plane
+//! bare for the default tenant — `crate::auth::scope_id`), so the plane
 //! is tenant-isolated at the storage layer: cross-tenant reads are
 //! indistinguishable from absence, and the HTTP surface answers them `404`
 //! — never `403`.

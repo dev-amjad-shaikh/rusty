@@ -329,7 +329,7 @@ pub struct SectionPolicy {
     pub budget_tokens: u32,
 
     /// The overflow rule; absent from the wire while unset, resolving to the
-    /// section kind's default ([`SectionKind::default_overflow`]).
+    /// section kind's default (`SectionKind::default_overflow`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overflow: Option<BudgetOverflow>,
 }

@@ -11185,7 +11185,7 @@ pub(crate) use postgres::{LazyPostgresCheckpointer, PostgresStore};
 /// still serves knowledge from these files.
 ///
 /// Every key is tenant-scoped (`{tenant}/{id}` for named tenants, bare for
-/// the default tenant — [`crate::auth::scope_id`]), and the records
+/// the default tenant — `crate::auth::scope_id`), and the records
 /// themselves carry bare ids: tenancy rides the key prefix, the same
 /// discipline the memory index applies.
 pub(crate) struct KnowledgePlane {

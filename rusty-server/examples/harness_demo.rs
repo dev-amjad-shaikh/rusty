@@ -19,6 +19,10 @@
 //! `RUSTY_HARNESS_ADDR` overrides the bind address and
 //! `RUSTY_HARNESS_STORE` the JSON-file store directory.
 
+// The demo surfaces return RustyError, which the feature flags inflate past
+// clippy's err-size threshold; boxing every site would obscure the examples.
+#![allow(clippy::result_large_err)]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

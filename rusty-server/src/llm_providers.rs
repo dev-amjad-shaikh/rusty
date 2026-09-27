@@ -1,7 +1,9 @@
 //! The models behind the platform, as configuration a person keeps: each
 //! provider is an OpenAI-compatible endpoint with a model name, a sealed
 //! API key, optional request extras and prices; one is primary, one may be
-//! the fallback. The graph holds a [`SwappableChatModel`]; what is behind it
+//! the fallback. The graph holds a
+//! [`SwappableChatModel`](rusty_agent_runtime::llm::SwappableChatModel); what
+//! is behind it
 //! is built from this configuration at boot and on every change, so a
 //! change takes effect without a restart. The environment (`RUSTY_LLM_*`,
 //! `RUSTY_LLM_FALLBACK_*`) seeds the configuration once, when the store

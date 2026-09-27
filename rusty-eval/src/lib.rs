@@ -75,6 +75,14 @@
 //! # }
 //! ```
 
+// `EvalError` wraps `rusty_agent_runtime::error::RustyError`, whose
+// feature-gated variants push it past clippy's 128-byte `Err` threshold
+// under `--all-features` — and the threshold then fires at every one of
+// this crate's hundred-plus `Result` signatures. The lint is disabled
+// crate-wide; boxing the runtime error is the core's 1.0-track decision,
+// not this crate's.
+#![allow(clippy::result_large_err)]
+
 pub mod simulator;
 
 pub mod assertion;

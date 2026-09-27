@@ -1015,9 +1015,9 @@ mod capsule_mediation {
 
         // The guest received exactly one secret: the issued handle token
         // under its connection id, bound to the invocation's run.
-        let token = outcome.output["secrets"][&connection_id()].as_str()(
-            "the guest echoed the injected tokens",
-        );
+        let token = outcome.output["secrets"][&connection_id()]
+            .as_str()
+            .expect("the guest echoed the injected tokens");
         let issued = broker.issued.lock().unwrap();
         assert_eq!(issued.len(), 1);
         assert_eq!(issued[0].run_id.as_deref(), Some("run-capsule"));
@@ -1030,9 +1030,8 @@ mod capsule_mediation {
         let events = journal.events();
         let call = events
             .iter()
-            .find(|event| event.kind == RunEventKind::WasmCall)(
-            "the invocation journaled its call",
-        );
+            .find(|event| event.kind == RunEventKind::WasmCall)
+            .expect("the invocation journaled its call");
         let evidence = serde_json::to_string(&call).unwrap();
         assert!(evidence.contains("secrets"), "got: {evidence}");
         assert!(

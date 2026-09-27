@@ -6,6 +6,11 @@
 //! - **AC 4** — steering via the real inbox, drain semantics from the log.
 //! - **AC 5** — scripted-simulator determinism across repetitions.
 
+// Integration tests return `RuntimeResult`/`Result` with the runtime's error
+// type, which exceeds clippy's 128-byte `Err` threshold under
+// `--all-features` (see the runtime crate root); a test file is its own
+// crate root.
+#![allow(clippy::result_large_err)]
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;

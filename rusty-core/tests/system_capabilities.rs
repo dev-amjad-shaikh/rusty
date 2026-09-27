@@ -40,7 +40,10 @@ fn result_content(results: &[ChatMessage]) -> &str {
 }
 
 fn hex_decode(encoded: &str) -> Vec<u8> {
-    assert!(encoded.len() % 2 == 0, "hex payloads are byte-aligned");
+    assert!(
+        encoded.len().is_multiple_of(2),
+        "hex payloads are byte-aligned"
+    );
     (0..encoded.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).expect("valid hex"))

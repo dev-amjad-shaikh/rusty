@@ -3,6 +3,11 @@
 //! runner end to end — evidence distillation, assertion grading, reports,
 //! judge verdicts, and baseline-vs-candidate comparison.
 
+// Integration tests return `RuntimeResult`/`Result` with the runtime's error
+// type, which exceeds clippy's 128-byte `Err` threshold under
+// `--all-features` (see the runtime crate root); a test file is its own
+// crate root.
+#![allow(clippy::result_large_err)]
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

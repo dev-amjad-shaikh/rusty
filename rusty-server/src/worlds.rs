@@ -158,7 +158,7 @@ impl Dialect {
                             "date": format!("2026-{:02}-{:02}", 7 + (n % 3), 1 + (n % 28)),
                             "party": parties[(n as usize) % parties.len()],
                             "amount": format!("{}.{:02}", 40 + (n * 17) % 900, (n * 7) % 100),
-                            "currency": if n % 5 == 0 { "EUR" } else { "GBP" },
+                            "currency": if n.is_multiple_of(5) { "EUR" } else { "GBP" },
                             "status": states[(n as usize) % states.len()],
                         })
                     })

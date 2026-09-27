@@ -86,7 +86,9 @@ pub struct Backup {
 pub enum RestoreOutcome {
     Restored {
         archive: String,
-        manifest: Option<Manifest>,
+        /// Boxed so the outcome enum stays near its `archive + reason`
+        /// siblings; the manifest is only read on the restore detail view.
+        manifest: Option<Box<Manifest>>,
         files: u64,
     },
     Skipped {
@@ -497,7 +499,7 @@ pub fn restore_if_asked(store_path: &Path, archive: Option<&Path>) -> Option<Res
             tracing::info!(archive = %name, files, "estate restored from a backup");
             Some(RestoreOutcome::Restored {
                 archive: name,
-                manifest,
+                manifest: manifest.map(Box::new),
                 files,
             })
         }
