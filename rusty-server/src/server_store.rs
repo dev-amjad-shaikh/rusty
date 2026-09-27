@@ -4537,6 +4537,27 @@ mod postgres {
         ALTER TABLE server_tasks
             ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION";
 
+    /// See [`ALTER_TASKS_ADD_PARENT_SQL`]: the task-tree parent link
+    /// (`NULL` = root task). TEXT like `parent`: it names a task, nothing
+    /// filters on it beyond one tenant-scoped lookup, so no index.
+    pub(crate) const ALTER_TASKS_ADD_PARENT_TASK_ID_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS parent_task_id TEXT";
+
+    /// See [`ALTER_TASKS_ADD_PARENT_SQL`]: the retry stage the claim scan
+    /// orders by. INTEGER NOT NULL DEFAULT 0 matches
+    /// [`CREATE_TASKS_SQL`].
+    pub(crate) const ALTER_TASKS_ADD_STAGE_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS stage INTEGER NOT NULL DEFAULT 0";
+
+    /// See [`ALTER_TASKS_ADD_PARENT_SQL`]: the coarse lifecycle bucket
+    /// (`todo`/`doing`/`done`) the board groups by. TEXT with the same
+    /// default as [`CREATE_TASKS_SQL`].
+    pub(crate) const ALTER_TASKS_ADD_STATUS_CATEGORY_SQL: &str = "
+        ALTER TABLE server_tasks
+            ADD COLUMN IF NOT EXISTS status_category TEXT NOT NULL DEFAULT 'todo'";
+
     /// `server_outbox`: the transactional outbox (R0.6 wave 2b). One row per
     /// pending task submission, 1:1 with the task it carries (`outbox_id` is
     /// the task id — re-writing the same row is a no-op). The task travels
@@ -10654,6 +10675,15 @@ mod postgres {
                 created_at: Utc::now(),
                 last_run_at: Some(Utc::now()),
                 runs_fired: 3,
+                world: None,
+                world_name: None,
+                worlds: Vec::new(),
+                world_names: Vec::new(),
+                stalled: None,
+                max_runs: None,
+                max_tokens: None,
+                tokens_spent: 0,
+                held: None,
             };
             let payload = record_to_payload(&record).unwrap();
             let back: CronRecord = record_from_payload("cron", payload).unwrap();
@@ -10747,7 +10777,6 @@ mod postgres {
                     parent_task_id: None,
                     stage: 0,
                     status_category: crate::tasks::StatusCategory::Todo,
-                    parent: None,
                 },
                 Utc::now(),
             )
