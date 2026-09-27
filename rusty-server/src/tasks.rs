@@ -146,6 +146,21 @@ impl StatusCategory {
     pub(crate) fn is_terminal(self) -> bool {
         matches!(self, Self::Done | Self::Cancelled)
     }
+
+    /// The storage/wire spelling — must match the serde representation
+    /// above, which the Postgres column (and the row reader) parse back.
+    /// Postgres-only: the file backend persists the record as JSON.
+    #[cfg(feature = "postgres")]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Todo => "todo",
+            Self::InProgress => "in_progress",
+            Self::InReview => "in_review",
+            Self::Done => "done",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 impl TaskStatus {

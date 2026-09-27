@@ -155,7 +155,10 @@ class TestServiceAndThreads(LiveServerTestCase):
         )
         self.assertEqual(thread["thread_id"], tid)
         self.assertEqual(thread["graph"], "pipeline")
-        self.assertEqual(thread["metadata"], {"origin": "sdk-test"})
+        # The server stamps provenance (created_by) into the metadata it
+        # stores; the caller's entry survives alongside it.
+        self.assertEqual(thread["metadata"]["origin"], "sdk-test")
+        self.assertIn("created_by", thread["metadata"])
 
     def test_03_error_unknown_graph(self) -> None:
         with self.assertRaises(RustyError) as ctx:
@@ -440,12 +443,13 @@ class TestFlightRecorder(LiveServerTestCase):
 
         # The executor journaled the full lifecycle.
         kinds = [e["kind"] for e in events]
+        # The run opens with its declared config before the first step.
+        self.assertEqual(kinds[0], "run_config_declared")
         for expected in (
             "super_step_start", "super_step_end", "node_input",
             "node_output", "routing_decision", "checkpoint_written",
         ):
             self.assertIn(expected, kinds)
-        self.assertEqual(kinds[0], "super_step_start")
 
         # Payload refs are adjacently tagged; demo pipeline nodes are pure.
         node_input = next(e for e in events if e["kind"] == "node_input")

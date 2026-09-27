@@ -158,7 +158,11 @@ test('info() reports service metadata and registered graphs', async () => {
   assert.ok(info.version, 'version present');
   assert.equal(info.checkpointer, 'json_file');
   const names = info.graphs.map((g) => g.name).sort();
-  assert.deepEqual(names, ['deep-dive', 'pipeline', 'react_agent']);
+  // The demo seeds its full catalog (builder companions included); the
+  // suite only requires the graphs it drives.
+  for (const expected of ['deep-dive', 'pipeline', 'react_agent']) {
+    assert.ok(names.includes(expected), `missing graph \`${expected}\``);
+  }
   const pipeline = info.graphs.find((g) => g.name === 'pipeline');
   assert.deepEqual(pipeline.channels, ['log']);
 });
@@ -400,7 +404,8 @@ test('runEvents() fetches the Flight Recorder journal of a completed run', async
   ]) {
     assert.ok(kinds.includes(expected), `missing \`${expected}\` event`);
   }
-  assert.equal(kinds[0], 'super_step_start');
+  // The run opens with its declared config before the first step.
+  assert.equal(kinds[0], 'run_config_declared');
 
   // Payload refs are adjacently tagged; demo pipeline nodes are pure.
   const nodeInput = body.events.find((e) => e.kind === 'node_input');

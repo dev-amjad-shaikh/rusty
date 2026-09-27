@@ -5358,9 +5358,6 @@ mod postgres {
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
             run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
-            parent_task_id, stage, status_category,
-            parent_task_id, stage, status_category,
-            parent_task_id, stage, status_category,
             parent_task_id, stage, status_category
         FROM server_tasks
         WHERE tenant = $1 AND idempotency_key = $2";
@@ -5440,7 +5437,8 @@ mod postgres {
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Heartbeat: extends the lease only while the caller holds it. No row
     /// means unknown/cross-tenant (404) or lease lost (409), distinguished
@@ -5452,7 +5450,8 @@ mod postgres {
         WHERE task_id = $1 AND tenant = $2 AND lease_owner = $3 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Complete: settle only the caller's own lease, storing the result,
     /// the effect receipt (`$6`, JSONB — `NULL` when none), and the
@@ -5466,14 +5465,16 @@ mod postgres {
         WHERE task_id = $1 AND tenant = $2 AND lease_owner = $3 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Fail, step 1: lock the row (the requeue-vs-dead decision needs the
     /// current attempt count, and concurrent settlement must serialize).
     pub(crate) const FAIL_SELECT_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         FROM server_tasks
         WHERE task_id = $1 AND tenant = $2
         FOR UPDATE";
@@ -5490,14 +5491,16 @@ mod postgres {
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Cancel, step 1: lock the row (the terminal check and the transition
     /// must serialize against claims and settlements).
     pub(crate) const CANCEL_SELECT_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         FROM server_tasks
         WHERE task_id = $1 AND tenant = $2
         FOR UPDATE";
@@ -5514,7 +5517,8 @@ mod postgres {
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Run cancel, part 1: the run's non-leased, non-terminal tasks move to
     /// the terminal `cancelled` state immediately.
@@ -5526,7 +5530,8 @@ mod postgres {
           AND (status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL))
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Run cancel, part 2: the run's leased tasks keep their leases and
     /// get `cancel_requested` set — their holders learn on the next
@@ -5537,7 +5542,8 @@ mod postgres {
         WHERE tenant = $1 AND run_id = $2 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Tenant-scoped existence probe distinguishing 404 from 409 after a
     /// lease-guarded update matched no row.
@@ -5547,13 +5553,15 @@ mod postgres {
     pub(crate) const SELECT_TASK_SQL: &str =
         "SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         FROM server_tasks WHERE task_id = $1 AND tenant = $2";
 
     pub(crate) const LIST_TASKS_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         FROM server_tasks
         WHERE tenant = $1 ORDER BY created_at, task_id";
 
@@ -5568,7 +5576,8 @@ mod postgres {
     pub(crate) const LIST_TASKS_BY_STATUS_SQL: &str = "
         SELECT task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at,
+            parent_task_id, stage, status_category
         FROM server_tasks
         WHERE tenant = $1 AND status = $2 ORDER BY created_at, task_id";
 
@@ -6156,7 +6165,8 @@ mod postgres {
           AND (status = 'queued' OR (status = 'failed' AND next_attempt_at IS NOT NULL))
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// Agent cancel, part 2: the mailbox's leased turn keeps its lease and
     /// gets `cancel_requested` set — its holder learns on the next
@@ -6168,7 +6178,8 @@ mod postgres {
         WHERE tenant = $1 AND recipient = $2 AND status = 'leased'
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
-            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at";
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
 
     /// The runtime's direct DLQ write (R0.7 wave 2): a task inserted
     /// terminal-`dead` with its evidence (`last_error`, payload) and no
@@ -6453,6 +6464,9 @@ mod postgres {
             .bind(&record.recipient)
             .bind(record.created_at)
             .bind(&record.parent)
+            .bind(&record.parent_task_id)
+            .bind(record.stage as i32)
+            .bind(record.status_category.as_str())
     }
 
     /// Assemble an [`OutboxRecord`] from one `server_outbox` row; a corrupt

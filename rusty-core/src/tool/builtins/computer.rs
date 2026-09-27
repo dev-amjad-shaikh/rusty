@@ -4,7 +4,7 @@
 //! — speak to a [`ComputerDriver`], never to the desktop directly. Two
 //! drivers ship:
 //!
-//! - [`MacOsComputerDriver`] (macOS only, `std::process` only): screenshots
+//! - `MacOsComputerDriver` (macOS only, `std::process` only): screenshots
 //!   via `/usr/sbin/screencapture -x` into a jailed temp path, click/type
 //!   via `osascript` System Events. Requires macOS accessibility and
 //!   screen-recording permissions at the OS level; the runtime neither
