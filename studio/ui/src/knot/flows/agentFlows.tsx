@@ -288,7 +288,7 @@ export function PreviewModal({ agent, draft }: { agent: Assistant; draft: AgentD
       <OvHead icon="ti-eye" title={`Preview — ${draft.name}`} sub="What an end user sees. Runs against the current draft." />
       <div className="ov-body"><div className="pv-wrap">
         <div className="pv-widget">
-          <div className="pv-head"><div className="ag-tile-sm" style={{ background: "var(--bg-tint)", color: "#fff" }}><i className="ti ti-robot" /></div><div><div className="n">{draft.name}</div><div className="s"><span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} /> Online</div></div></div>
+          <div className="pv-head"><div className="ag-tile-sm" style={{ background: "var(--bg-tint)", color: "var(--on-tint)" }}><i className="ti ti-robot" /></div><div><div className="n">{draft.name}</div><div className="s"><span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} /> Online</div></div></div>
           <div className="pv-thread">{msgs.map((m, i) => <div key={i} className={`msg ${m.who}`}><div className="bub">{m.who === "agent" ? <div className="md">{renderMarkdown(m.text)}</div> : m.text}</div></div>)}{busy && <div className="msg agent"><div className="thinking"><span /><span /><span /></div></div>}</div>
           <div className="pv-foot"><div className="composer"><textarea rows={1} placeholder="Type a message…" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} /><button className="composer-send" onClick={() => void send()}><i className="ti ti-arrow-up" /></button></div></div>
         </div>
@@ -565,7 +565,7 @@ export function AddToolsDrawer({ catalog, instances, have, onAdd }: { catalog: S
           <div className="src-list">
             {sources.map((s, i) => (
               <div key={s.instance_id} className={`src-opt${i === src ? " sel" : ""}`} onClick={() => setSrc(i)}>
-                <div className="item-ic logo" style={{ background: "var(--bg-tint)", color: "#fff" }}><i className="ti ti-plug-connected" /></div>
+                <div className="item-ic logo" style={{ background: "var(--bg-tint)", color: "var(--on-tint)" }}><i className="ti ti-plug-connected" /></div>
                 <div className="item-body"><div className="item-name">{s.connector?.display_name ?? s.instance_id}</div><div className="item-desc">{(() => { const n = (s.tools ?? []).length || (manifests.find((x) => x.hash === s.manifest_hash)?.operations.length ?? 0); return `${n} action${n === 1 ? "" : "s"}`; })()}</div></div>
                 {s.authorization && (s.authorization.kind === "needs_auth" || s.authorization.kind === "expired") ? <Badge tone="warn">Needs authorization</Badge> : <Badge tone="good">Connected</Badge>}
               </div>
@@ -683,7 +683,7 @@ export function AddConnectorDrawer({ onConnected }: { onConnected: () => void })
           <div className="cat-label"><span>Library</span><span className="ln" /></div>
           {manifests.filter((m) => !q || `${m.display_name} ${m.description}`.toLowerCase().includes(q.toLowerCase())).map((m) => { const a = AUTH[authOf(m)]; const is = connected.has(m.hash); return (
             <div key={m.hash} className="item">
-              <div className="item-ic logo" style={{ background: "var(--bg-tint)", color: "#fff" }}><i className="ti ti-plug-connected" /></div>
+              <div className="item-ic logo" style={{ background: "var(--bg-tint)", color: "var(--on-tint)" }}><i className="ti ti-plug-connected" /></div>
               <div className="item-body"><div className="item-name">{m.display_name}</div><div className="item-desc">{m.description}</div><div className="item-meta"><span className="item-tag auth-tag"><i className={`ti ${a.icon}`} /> {a.label}</span><span className="item-tag">{m.operations.length} ops</span></div></div>
               {is ? <Badge tone="good">Connected</Badge> : <button className="m-btn secondary sm" onClick={() => open("modal", <CredentialModal manifest={m} onDone={() => { onConnected(); }} />)}>Connect</button>}
             </div>
@@ -768,7 +768,7 @@ export function CredentialModal({ manifest, onDone }: { manifest: ConnectorManif
   }
   return (
     <div className="m-modal">
-      <OvHead icon="ti-plug-connected" bg="var(--bg-tint)" fg="#fff" logo title={`Connect ${manifest.display_name}`} sub={manifest.description} />
+      <OvHead icon="ti-plug-connected" bg="var(--bg-tint)" fg="var(--on-tint)" logo title={`Connect ${manifest.display_name}`} sub={manifest.description} />
       <div className="ov-body">
         <div className="auth-method"><i className={`ti ${a.icon}`} /><div><b>{a.label}</b><span>{a.hint}</span></div></div>
         <div className="frow" style={{ marginTop: 16 }}>

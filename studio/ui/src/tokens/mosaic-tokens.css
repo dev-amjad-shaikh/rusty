@@ -1,0 +1,163 @@
+/* MOSAIC DESIGN SYSTEM — tokens.
+ *
+ * The Knot stone palette, light and dark. Extracted from the prototype's
+ * core stylesheet so the token layer lives in one place; component styles
+ * reach these through var() and never restate raw values. Raw literals are
+ * the point of this file — the tokens tier is exempt from check-tiers'
+ * literal sweep. Fonts ship via @fontsource (see src/main.tsx). */
+
+:root {
+  /* ── Surfaces — Knot stone ───────────────────────────── */
+  --bg-page:     #faf9f7;
+  --bg-canvas:   #ffffff;
+  --bg-surface:  #ffffff;
+  --bg-tint:     #faf9f7;
+  --bg-muted:    #f5f5f4;
+
+  /* ── Ink — warm stone ramp ────────────────────────────── */
+  --ink-900:  #1c1917;
+  --ink-800:  #292524;
+  --ink-700:  #44403c;
+  --ink-600:  #57534e;
+  --ink-500:  #78716c;
+  --ink-400:  #a8a29e;
+  --ink-300:  #d6d3d1;
+  --ink-200:  #e7e5e4;
+  --ink-100:  #f5f5f4;
+
+  /* ── Lines — one border ───────────────────────────────── */
+  --line:        #e7e5e4;
+  --line-soft:   #f5f5f4;
+  --line-strong: #d6d3d1;
+
+  /* ── Brand — stone-900 is the one solid action ───────── */
+  --brand:        #1c1917;
+  --brand-strong: #0c0a09;
+  --brand-soft:   #f5f5f4;
+  --on-brand:     #ffffff;
+
+  /* ── Signal — the only five ──────────────────────────── */
+  --good:      #047857;  --good-bg:   #ecfdf5;  --good-line: #a7f3d0;  --good-dot: #059669;
+  --warn:      #92400e;  --warn-bg:   #fffbeb;  --warn-line: #fde68a;  --warn-dot: #d97706;
+  --bad:       #be123c;  --bad-bg:    #fff1f2;  --bad-line:  #fecdd3;  --bad-dot:  #e11d48;
+  --info:      #1d4ed8;  --info-bg:   #eff6ff;  --info-line: #bfdbfe;  --info-dot: #2563eb;
+
+  /* ── Accent retired → stone-900 ──────────────────────── */
+  --accent:     #1c1917;
+  --accent-bg:  #f5f5f4;
+  --accent-ink: #ffffff;
+
+  /* ── Categorical collapsed to stone (agents = stone-900 squircle) ── */
+  --cat-blue:   #44403c;  --cat-blue-bg:  #f5f5f4;
+  --cat-amber:  #44403c;  --cat-amber-bg: #f5f5f4;
+  --cat-plum:   #44403c;  --cat-plum-bg:  #f5f5f4;
+  --cat-orange: #44403c;  --cat-orange-bg:#f5f5f4;
+  --cat-peach:  #44403c;  --cat-peach-bg: #f5f5f4;
+  --cat-teal:   #44403c;  --cat-teal-bg:  #f5f5f4;
+  --cat-rose:   #44403c;  --cat-rose-bg:  #f5f5f4;
+
+  /* ── Type — Inter + JetBrains Mono, five sizes ────────── */
+  --font-sans:    'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  --fs-2xs:  10px;
+  --fs-xs:   12px;
+  --fs-sm:   12px;
+  --fs-base: 13.5px;
+  --fs-md:   13.5px;
+  --fs-lg:   14.5px;
+  --fs-xl:   16px;
+  --fs-2xl:  20px;
+  --fs-3xl:  20px;
+  --fs-4xl:  30px;
+  --fs-5xl:  30px;
+
+  /* ── Radii — four ─────────────────────────────────────── */
+  --r-xs:  4px;
+  --r-sm:  6px;
+  --r-md:  8px;
+  --r-lg:  8px;
+  --r-xl:  12px;
+  --r-pill: 999px;
+
+  /* ── Spacing scale ────────────────────────────────────── */
+  --space-0p5: 2px;
+  --space-1: 4px;   --space-2: 8px;   --space-3: 12px;
+  --space-4: 16px;  --space-5: 20px;  --space-6: 24px;
+  --space-8: 32px;  --space-10: 40px; --space-12: 48px;
+  --space-16: 64px; --space-30: 120px;
+  /* Half steps — the prototype's 2px-grid values. */
+  --space-1p5: 6px;  --space-2p5: 10px; --space-3p5: 14px;
+  --space-4p5: 18px; --space-5p5: 22px; --space-7: 28px;
+
+  /* ── Overlays — scrims and text on tint tiles, both themes. */
+  --scrim: rgba(28, 25, 23, 0.32);
+  --scrim-deep: rgba(20, 24, 27, 0.42);
+  --on-tint: #ffffff;
+
+  /* ── Elevation — depth from border + canvas, not shadow ── */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.06);
+  --shadow-lg: 0 12px 28px rgba(28, 25, 23, 0.10);
+  --shadow-xl: 0 24px 56px rgba(28, 25, 23, 0.14);
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --dur-fast:   120ms;
+  --dur-base:   180ms;
+  --dur-slow:   280ms;
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring:cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Sizing ───────────────────────────────────────────── */
+  --rail-w:    256px;
+  --content-max: 1080px;
+}
+
+[data-theme="dark"] {
+  --bg-page:     #0c0a09;
+  --bg-canvas:   #1c1917;
+  --bg-surface:  #1c1917;
+  --bg-tint:     #292524;
+  --bg-muted:    #292524;
+
+  --ink-900:  #faf9f7;
+  --ink-800:  #f5f5f4;
+  --ink-700:  #e7e5e4;
+  --ink-600:  #d6d3d1;
+  --ink-500:  #a8a29e;
+  --ink-400:  #78716c;
+  --ink-300:  #57534e;
+  --ink-200:  #44403c;
+  --ink-100:  #292524;
+
+  --line:        #292524;
+  --line-soft:   #292524;
+  --line-strong: #44403c;
+
+  --brand:        #faf9f7;
+  --brand-strong: #ffffff;
+  --brand-soft:   #292524;
+  --on-brand:     #1c1917;
+
+  --good:      #34d399;  --good-bg:   #052e22;  --good-line: #065f46;  --good-dot: #10b981;
+  --warn:      #fbbf24;  --warn-bg:   #2e1f07;  --warn-line: #78350f;  --warn-dot: #f59e0b;
+  --bad:       #fb7185;  --bad-bg:    #3b0a15;  --bad-line:  #881337;  --bad-dot:  #f43f5e;
+  --info:      #60a5fa;  --info-bg:   #0f1f3d;  --info-line: #1e3a8a;  --info-dot: #3b82f6;
+
+  --accent:     #faf9f7;  --accent-bg:  #292524;  --accent-ink: #1c1917;
+
+  --cat-blue:   #d6d3d1;  --cat-blue-bg:  #292524;
+  --cat-amber:  #d6d3d1;  --cat-amber-bg: #292524;
+  --cat-plum:   #d6d3d1;  --cat-plum-bg:  #292524;
+  --cat-orange: #d6d3d1;  --cat-orange-bg:#292524;
+  --cat-peach:  #d6d3d1;  --cat-peach-bg: #292524;
+  --cat-teal:   #d6d3d1;  --cat-teal-bg:  #292524;
+  --cat-rose:   #d6d3d1;  --cat-rose-bg:  #292524;
+
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.45);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.55);
+  --shadow-xl: 0 24px 56px rgba(0,0,0,0.65);
+}

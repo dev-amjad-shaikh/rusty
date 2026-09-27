@@ -1,0 +1,87 @@
+/* Rusty design tokens — the single source of visual truth.
+ * Values are the design handoff's, verbatim (01-design-system.md + the
+ * reference HTML). Two themes only; `data-theme` on the root selects.
+ *
+ * This file is the tokens tier: raw literals are the point here. Every
+ * other stylesheet reaches values through these variables — enforced by
+ * scripts/check-tiers.mjs. */
+
+:root {
+  --font-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Radii — controls 8, cards 10–12, main card 14, app frame 18, pills 999. */
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-card-lg: 14px;
+  --r-frame: 18px;
+  --r-pill: 999px;
+
+  /* Type ramp — base size plus the smaller control sizes. */
+  --fs-base: 13px;
+  --fs-sm: 12px;
+  --fs-xs: 11px;
+  --fs-2xs: 10px;
+
+  /* Spacing — 4px grid with half steps (Tailwind naming). */
+  --space-0p5: 2px;
+  --space-1: 4px;
+  --space-1p5: 6px;
+  --space-2: 8px;
+  --space-2p5: 10px;
+  --space-3: 12px;
+  --space-3p5: 14px;
+  --space-4: 16px;
+  --space-4p5: 18px;
+  --space-5: 20px;
+  --space-5p5: 22px;
+  --space-6: 24px;
+  --space-7: 28px;
+
+  /* Elevation — the switch knob sits above its track. */
+  --shadow-knob: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #e8e8e8;
+  --bg: #f7f7f7;
+  --panel: #ffffff;
+  --line: #e6e6e6;
+  --ink: #141414;
+  --ink2: #6b6b6b;
+  --ink3: #9b9b9b;
+  --accent: #141414;
+  --accent-soft: #ececec;
+  --ok: #1f9d6a;
+  --ok-soft: #e6f6ee;
+  --warn: #b7791f;
+  --warn-soft: #fbf1dc;
+  --err: #d3322b;
+  --err-soft: #fbe6e4;
+  --code: #f2f2f2;
+  --focus: #1f9d6a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0f0f0f;
+  --bg: #171717;
+  --panel: #1d1d1d;
+  --line: #2c2c2c;
+  --ink: #f0f0f0;
+  --ink2: #a3a3a3;
+  --ink3: #6f6f6f;
+  --accent: #f0f0f0;
+  --accent-soft: #2a2a2a;
+  --ok: #3fbf85;
+  --ok-soft: #14301f;
+  --warn: #d9a541;
+  --warn-soft: #2f2712;
+  --err: #ef6b5f;
+  --err-soft: #3a1a17;
+  --code: #242424;
+  --focus: #3fbf85;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}

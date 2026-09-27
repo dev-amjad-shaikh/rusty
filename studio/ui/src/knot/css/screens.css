@@ -10,7 +10,7 @@
 .lib-top {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 12px;
-  padding: 13px 32px;
+  padding: var(--space-3) var(--space-8);
   background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
   backdrop-filter: saturate(140%) blur(12px);
   border-bottom: 1px solid var(--line);
@@ -24,7 +24,7 @@
 .lib-hero { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 28px; }
 .lib-hero .lh-ic { width: 56px; height: 56px; border-radius: var(--r-md); display: grid; place-items: center; font-size: 28px; flex-shrink: 0; }
 .lib-hero .lh-main { flex: 1; min-width: 0; }
-.lib-eyebrow { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+.lib-eyebrow { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.12em; color: var(--accent); margin-bottom: 8px; }
 .lib-title { font-family: var(--font-display); font-size: var(--fs-3xl); font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0; }
 .lib-lead { font-size: var(--fs-md); color: var(--ink-600); margin-top: 9px; max-width: 60ch; line-height: 1.55; text-wrap: pretty; }
 .lib-hero .lh-act { flex-shrink: 0; }
@@ -51,7 +51,7 @@
 .lcard:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); border-color: var(--line-strong); }
 .lcard-top { display: flex; align-items: flex-start; gap: 12px; }
 .lcard-ic { width: 42px; height: 42px; border-radius: var(--r-sm); display: grid; place-items: center; font-size: 21px; flex-shrink: 0; }
-.lcard-ic.logo { color: #fff; }
+.lcard-ic.logo { color: var(--on-tint); }
 .lcard-title { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
 .lcard-title .mono { font-family: var(--font-mono); font-weight: 600; }
 .lcard-sub { font-family: var(--font-mono); font-size: 10px; color: var(--ink-500); margin-top: 3px; }
@@ -62,7 +62,7 @@
 .lcard-foot .sp { flex: 1; }
 
 /* category headers between grids */
-.lib-cat { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-500); margin: 30px 2px 14px; display: flex; align-items: center; gap: 10px; }
+.lib-cat { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.13em; color: var(--ink-500); margin: 30px 2px 14px; display: flex; align-items: center; gap: 10px; }
 .lib-cat:first-of-type { margin-top: 6px; }
 .lib-cat .ln { flex: 1; height: 1px; background: var(--line); }
 .lib-cat .gc { color: var(--ink-400); letter-spacing: 0; }
@@ -75,7 +75,7 @@
 
 /* avatar stack for "used by" */
 .used-stack { display: inline-flex; }
-.used-stack .ua { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #fff; border: 2px solid var(--bg-surface); margin-left: -7px; }
+.used-stack .ua { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: var(--on-tint); border: 2px solid var(--bg-surface); margin-left: -7px; }
 .used-stack .ua:first-child { margin-left: 0; }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -94,7 +94,7 @@
 .wz-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 34px; }
 .wz-brand .bm { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--brand); color: var(--on-brand); display: grid; place-items: center; }
 .wz-brand .bt { font-family: var(--font-display); font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.02em; }
-.wz-brand .bs { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-500); }
+.wz-brand .bs { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: var(--ink-500); }
 
 .wz-steps { display: flex; flex-direction: column; gap: 2px; }
 .wz-step { display: flex; align-items: center; gap: 13px; padding: 11px 12px; border-radius: var(--r-sm); cursor: pointer; transition: background var(--dur-fast); }
@@ -104,7 +104,7 @@
 .wz-step.active { background: var(--bg-surface); box-shadow: var(--shadow-xs); }
 .wz-step.active .sn { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .wz-step.active .sl { color: var(--ink-900); }
-.wz-step.done .sn { border-color: var(--good); background: var(--good); color: #fff; }
+.wz-step.done .sn { border-color: var(--good); background: var(--good); color: var(--on-tint); }
 .wz-step.done .sl { color: var(--ink-700); }
 .wz-rail-foot { margin-top: auto; font-family: var(--font-mono); font-size: 10px; color: var(--ink-400); }
 
@@ -117,7 +117,7 @@
 .wz-close { position: absolute; top: 20px; right: 24px; width: 36px; height: 36px; border-radius: var(--r-sm); display: grid; place-items: center; color: var(--ink-500); font-size: 20px; background: var(--bg-surface); border: 1px solid var(--line); }
 .wz-close:hover { color: var(--ink-900); background: var(--bg-muted); }
 
-.wz-eyebrow { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 11px; }
+.wz-eyebrow { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.12em; color: var(--accent); margin-bottom: 11px; }
 .wz-h { font-family: var(--font-display); font-size: var(--fs-3xl); font-weight: 600; letter-spacing: -0.025em; line-height: 1.08; margin: 0 0 10px; }
 .wz-sub { font-size: var(--fs-md); color: var(--ink-600); line-height: 1.55; margin-bottom: 28px; max-width: 52ch; }
 
@@ -134,7 +134,7 @@
 /* The palette collapses every category to stone, so a swatch alone cannot be
    told from its neighbour: the name under it is the choice. */
 .swatch-pick { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
-.swatch-name { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink-500); text-transform: uppercase; }
+.swatch-name { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink-500); }
 .swatch-pick.sel .swatch-name { color: var(--ink-900); }
 .swatch { width: 40px; height: 40px; border-radius: var(--r-sm); cursor: pointer; border: 2px solid transparent; transition: transform var(--dur-fast); display: grid; place-items: center; }
 .swatch:hover { transform: scale(1.08); }

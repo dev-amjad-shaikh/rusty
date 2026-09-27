@@ -1,21 +1,21 @@
 /* Controls — the primitive vocabulary. Every value traces to the design
- * handoff's control spec (01-design-system.md §Controls). Colors, radii and
- * fonts come from theme tokens; sizes are the design's exact per-control px. */
+ * handoff's control spec (01-design-system.md §Controls). Colors, radii,
+ * fonts and spacing come from the tokens in src/tokens/. */
 
 .rn-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--space-1p5);
   border: none;
   border-radius: var(--r-control);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
-  padding: 8px 14px;
+  padding: var(--space-2) var(--space-3p5);
   transition: background 120ms, border-color 120ms, color 120ms;
 }
 .rn-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -29,7 +29,7 @@
   color: var(--ink);
   border: 1px solid var(--line);
   font-weight: 500;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
 }
 .rn-btn--secondary.rn-btn--sm { padding: 6px 10px; }
 .rn-btn--secondary:not(:disabled):hover { border-color: var(--ink3); }
@@ -37,7 +37,7 @@
 .rn-btn--ghost {
   background: transparent;
   color: var(--ink2);
-  padding: 6px 4px;
+  padding: var(--space-1p5) var(--space-1);
   font-weight: 500;
 }
 .rn-btn--ghost:not(:disabled):hover { color: var(--ink); }
@@ -46,8 +46,8 @@
   background: var(--warn-soft);
   color: var(--warn);
   border: 1px solid var(--warn);
-  padding: 5px 10px;
-  font-size: 12px;
+  padding: var(--space-1) var(--space-2p5);
+  font-size: var(--fs-sm);
 }
 .rn-btn--danger { background: var(--err); color: var(--panel); }
 
@@ -55,14 +55,14 @@
 .rn-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  gap: var(--space-1p5);
+  padding: var(--space-1) var(--space-2p5);
   border-radius: var(--r-pill);
   border: 1px solid var(--line);
   background: transparent;
   color: var(--ink2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -85,13 +85,13 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2p5);
   border: 1px solid var(--line);
   border-radius: var(--r-control);
   background: var(--panel);
   color: var(--ink);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-base);
   outline: none;
 }
 .rn-select { padding-right: 28px; background-color: var(--panel); }
@@ -102,15 +102,14 @@
 .rn-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+  gap: var(--space-1);
+  padding: var(--space-0p5) var(--space-1p5);
   border-radius: var(--r-control);
   border: 1px solid currentColor;
   background: transparent;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 .rn-badge--ok { color: var(--ok); }
@@ -127,12 +126,11 @@
 .rn-dot--ink { background: var(--ink); }
 .rn-dot--ink3 { background: var(--ink3); }
 
-/* Section label — 11 / 600 / .06em / uppercase / ink3 */
+/* Section label — 11 / 600 / .06em / ink3 */
 .rn-section-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--ink3);
 }
 
@@ -143,7 +141,7 @@
 .rn-page-header__text { flex: 1; min-width: min(100%, 260px); display: grid; gap: 4px; }
 .rn-page-header__title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rn-page-header__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.rn-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.rn-eyebrow { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.08em; color: var(--accent); }
 .rn-page-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
 .rn-page-sub { margin: 0; font-size: 13px; color: var(--ink2); max-width: 70ch; }
 .rn-link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
@@ -195,8 +193,9 @@
 .rn-stat--warn .rn-bar__fill { background: var(--warn); }
 .rn-stat--err .rn-bar__fill { background: var(--err); }
 
-.rn-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; font-weight: 700; letter-spacing: 0.02em; flex-shrink: 0; background: hsl(var(--avatar-hue) 60% 92%); color: hsl(var(--avatar-hue) 45% 32%); }
-:root[data-theme="dark"] .rn-avatar, [data-theme="dark"] .rn-avatar { background: hsl(var(--avatar-hue) 30% 22%); color: hsl(var(--avatar-hue) 60% 78%); }
+/* tiers:allow — hue-derived avatar tint, by design (hue set per instance). */
+.rn-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; font-weight: 700; letter-spacing: 0.02em; flex-shrink: 0; background: hsl(var(--avatar-hue) 60% 92%); color: hsl(var(--avatar-hue) 45% 32%); } /* tiers:allow */
+:root[data-theme="dark"] .rn-avatar, [data-theme="dark"] .rn-avatar { background: hsl(var(--avatar-hue) 30% 22%); color: hsl(var(--avatar-hue) 60% 78%); } /* tiers:allow */
 
 .rn-choice { display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; min-width: 0; transition: border-color 120ms, background 120ms; }
 .rn-choice:hover { border-color: var(--ink3); }
@@ -216,7 +215,7 @@
 .rn-switch-row__desc { font-size: 12px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn-switch-row__meta { font-size: 11px; color: var(--ink3); }
 .rn-switch { width: 34px; height: 20px; border-radius: 10px; border: none; background: var(--line); position: relative; cursor: pointer; flex-shrink: 0; transition: background 120ms; }
-.rn-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: left 120ms; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.rn-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: left 120ms; box-shadow: var(--shadow-knob); }
 .rn-switch--on { background: var(--accent); }
 .rn-switch--on::after { left: 16px; }
 .rn-switch:disabled { opacity: 0.5; cursor: not-allowed; }

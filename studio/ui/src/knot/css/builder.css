@@ -20,13 +20,14 @@
   background: var(--bg-page);
   border-right: 1px solid var(--line);
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 0 12px; gap: 3px;
+  padding: var(--space-3p5) 0 var(--space-3);
+  gap: var(--space-1);
 }
 .strip-mark {
   width: 34px; height: 34px; border-radius: var(--r-sm);
   background: var(--brand); color: var(--on-brand);
   display: grid; place-items: center; flex-shrink: 0;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .strip-mark svg { width: 19px; height: 19px; }
 .strip-btn {
@@ -50,8 +51,8 @@
 
 .rl-group-label {
   font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.13em;
-  text-transform: uppercase; color: var(--ink-500);
-  padding: 12px 8px 5px; display: flex; align-items: center; gap: 7px;
+  color: var(--ink-500);
+  padding: var(--space-3) var(--space-2) var(--space-1); display: flex; align-items: center; gap: var(--space-2);
 }
 .rl-group-label .gc { margin-left: auto; color: var(--ink-400); letter-spacing: 0; }
 
@@ -73,7 +74,7 @@
   grid-column: 1 / -1;
   position: sticky; top: 0; z-index: 30;
   display: flex; align-items: center; gap: 14px;
-  padding: 11px 22px;
+  padding: var(--space-3) var(--space-5p5);
   background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
   backdrop-filter: saturate(140%) blur(12px);
   border-bottom: 1px solid var(--line);
@@ -134,7 +135,7 @@
 .model-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .model-pick { display: flex; align-items: center; gap: 10px; padding: 9px 13px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--bg-surface); cursor: pointer; transition: border-color var(--dur-fast); }
 .model-pick:hover { border-color: var(--ink-400); }
-.model-logo { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; color: #fff; flex-shrink: 0; }
+.model-logo { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; color: var(--on-tint); flex-shrink: 0; }
 .model-pick .mn { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-900); }
 .model-pick .mp { font-family: var(--font-mono); font-size: 10px; color: var(--ink-500); }
 .param { display: flex; align-items: center; gap: 12px; }
@@ -145,7 +146,8 @@
 .instr-editor {
   font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.7;
   background: var(--bg-tint); border: 1px solid var(--line-strong); border-radius: var(--r-md);
-  padding: 16px 18px; color: var(--ink-800); min-height: 150px; white-space: pre-wrap;
+  padding: var(--space-4) var(--space-4p5);
+  color: var(--ink-800); min-height: 150px; white-space: pre-wrap;
   outline: none;
 }
 .instr-editor:focus { border-color: var(--ink-700); box-shadow: 0 0 0 3px var(--brand-soft); }
@@ -176,7 +178,7 @@
 .skill + .skill { margin-top: 11px; }
 .skill-top { display: flex; align-items: center; gap: 13px; padding: 13px 15px; }
 .skill-tools { display: flex; align-items: center; gap: 7px; padding: 9px 15px; border-top: 1px solid var(--line); background: var(--bg-tint); font-size: var(--fs-xs); color: var(--ink-500); flex-wrap: wrap; }
-.skill-tools .lbl { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+.skill-tools .lbl { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; }
 
 /* Memory config */
 .mem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -210,7 +212,7 @@
 
 .msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
 .msg.user { align-items: flex-end; }
-.msg .who { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-400); padding: 0 2px; }
+.msg .who { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; color: var(--ink-400); padding: 0 2px; }
 .bub { padding: 11px 14px; border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.6; }
 .msg.user .bub { background: var(--brand); color: var(--on-brand); border-bottom-right-radius: 5px; max-width: 85%; }
 .msg.agent .bub { background: var(--bg-surface); border: 1px solid var(--line); color: var(--ink-800); border-bottom-left-radius: 5px; }

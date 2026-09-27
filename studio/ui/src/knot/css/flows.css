@@ -32,7 +32,7 @@
 .ov-search input { border: none; background: none; outline: none; font: inherit; font-size: var(--fs-sm); color: var(--ink-900); width: 100%; }
 
 /* ── Category label inside catalogs ───────────────────── */
-.cat-label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-500); margin: 18px 2px 9px; display: flex; align-items: center; gap: 8px; }
+.cat-label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.13em; color: var(--ink-500); margin: 18px 2px 9px; display: flex; align-items: center; gap: 8px; }
 .cat-label:first-child { margin-top: 2px; }
 .cat-label .ln { flex: 1; height: 1px; background: var(--line); }
 
@@ -54,7 +54,7 @@
 .mdl-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: var(--r-sm); cursor: pointer; transition: background var(--dur-fast); border: 1px solid transparent; }
 .mdl-row:hover { background: var(--bg-muted); }
 .mdl-row.sel { background: var(--accent-bg); border-color: var(--accent); }
-.mdl-logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 15px; flex-shrink: 0; }
+.mdl-logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--on-tint); font-size: 15px; flex-shrink: 0; }
 .mdl-body { flex: 1; min-width: 0; }
 .mdl-name { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-900); }
 .mdl-meta { font-family: var(--font-mono); font-size: 10px; color: var(--ink-500); margin-top: 1px; }
@@ -104,7 +104,7 @@
 
 /* ── OAuth connect panel ──────────────────────────────── */
 .oauth { text-align: center; padding: 8px 8px 4px; }
-.oauth-logo { width: 60px; height: 60px; border-radius: var(--r-md); display: grid; place-items: center; font-size: 30px; color: #fff; margin: 8px auto 16px; }
+.oauth-logo { width: 60px; height: 60px; border-radius: var(--r-md); display: grid; place-items: center; font-size: 30px; color: var(--on-tint); margin: 8px auto 16px; }
 .oauth-flow { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 4px 0 18px; }
 .oauth-node { width: 44px; height: 44px; border-radius: var(--r-sm); display: grid; place-items: center; font-size: 22px; border: 1px solid var(--line); background: var(--bg-surface); }
 .oauth-scopes { text-align: left; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; margin-top: 6px; }
@@ -118,7 +118,7 @@
 .pick-tool.on { border-color: var(--accent); background: var(--accent-bg); }
 .pick-tool .pt-ic { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; font-size: 15px; flex-shrink: 0; }
 .pick-tool .pt-name { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 500; flex: 1; }
-.pick-tool .pt-check { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--ink-400); display: grid; place-items: center; color: #fff; font-size: 12px; flex-shrink: 0; }
+.pick-tool .pt-check { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--ink-400); display: grid; place-items: center; color: var(--on-tint); font-size: 12px; flex-shrink: 0; }
 .pick-tool.on .pt-check { background: var(--accent); border-color: var(--accent); }
 
 /* trigger type list */

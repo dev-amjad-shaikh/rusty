@@ -1,5 +1,7 @@
 /* The Knot theme, as handed off: the prototype's stylesheets in the order it
- * loads them, unchanged. theme-knot.css is last and wins. */
+ * loads them. Tokens come first — the shell tokens, then the Knot stone
+ * palette (which wins on shared names). theme-knot.css is last and wins. */
+@import "../tokens/mosaic-tokens.css";
 @import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 @import "./css/mosaic.css";
 @import "./css/components.css";

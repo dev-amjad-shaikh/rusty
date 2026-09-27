@@ -109,7 +109,7 @@ function ManageDrawer({ manifest, instance, agents, onChanged, newer, standIns =
   }
   return (
     <div className="m-drawer">
-      <OvHead icon="ti-plug-connected" bg="var(--bg-tint)" fg="#fff" logo title={manifest.display_name} sub={`Connected ${ago(instance.created_at)}`} />
+      <OvHead icon="ti-plug-connected" bg="var(--bg-tint)" fg="var(--on-tint)" logo title={manifest.display_name} sub={`Connected ${ago(instance.created_at)}`} />
       <div className="ov-body">
         <div className="kv"><span className="k">Status</span><span className="v"><Badge tone={grant[0]}>{grant[1]}</Badge></span><span className="k">Connected</span><span className="v">{ago(instance.created_at)}</span><span className="k">Address</span><span className="v" style={{ fontSize: 12, color: "var(--ink-500)" }}>{manifest.base_url.replace(/^https?:\/\//, "")}</span><span className="k">Used by</span><span className="v"><UsedStack agents={agents.map((x) => x.name)} /></span></div>
         <div className="cat-label"><span>What agents can do with it</span><span className="ln" /></div>
