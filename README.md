@@ -2,11 +2,17 @@
 
 **The durable agent runtime built in Rust.**
 
+<p align="center">
+  <a href="https://aboutrusty.com"><img src="docs/screenshots/aboutrusty-banner.png" alt="Rusty — build AI agents that don't lose their work · aboutrusty.com"></a>
+</p>
+
 [![CI](https://github.com/dev-amjad-shaikh/rusty/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-amjad-shaikh/rusty/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE-MIT)
 [![Docs: architecture](https://img.shields.io/badge/docs-architecture-informational)](docs/architecture.md)
 
 Rusty is a durable, LangGraph-style agent runtime and server built in Rust. You define an agent as a graph of nodes over schema-declared JSON state with runtime validation; the engine executes that graph in transactional super-steps and writes a versioned checkpoint at every step boundary. The same compiled graph runs embedded in your process, behind the included axum HTTP/SSE server as a single static binary, and across remote nodes and sandboxed WASM modules.
+
+**[aboutrusty.com](https://aboutrusty.com)** is the project's website — *Inside Rusty*, the book-length guide to the runtime and its internals, the Learn course, the task-oriented docs, and release notes all live there.
 
 ## Why Rusty exists
 
