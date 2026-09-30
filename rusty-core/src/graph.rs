@@ -62,10 +62,12 @@ pub enum Route {
 /// A single dynamic fan-out instruction: run `node` once with `state` as
 /// its scoped input state.
 ///
-/// Semantics for the executor: the scoped state is merged into the shared
-/// state before the node runs (so the node sees its item), and the node's
-/// updates merge back through the normal channel reducers — fan-in requires
-/// multi-write reducers on the destination channels.
+/// Semantics for the executor: each invocation runs against its own clone
+/// of the shared snapshot with the scoped state overlaid on that clone (so
+/// the node sees its item, and the shared state is never touched), and the
+/// node's updates merge back through the normal channel reducers at the
+/// barrier — fan-in requires multi-write reducers on the destination
+/// channels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Send {
     /// Target node name (must resolve to a known node at execution time).
@@ -262,9 +264,10 @@ impl GraphBuilder {
     ///
     /// [`GraphBuilder::compile`] rejects a node that has both static and
     /// conditional edges — ambiguous routing fails when you call `compile()`,
-    /// not as a runtime surprise. Dynamic routing via `Command::goto` from a node
-    /// that also has static edges remains a runtime rule: both paths
-    /// execute.
+    /// not as a runtime surprise. Dynamic routing via `Command::goto` is a
+    /// runtime rule with a sharper edge: a super-step in which any node
+    /// returned a `goto` follows only those targets — the outgoing edges of
+    /// the nodes that ran are not evaluated for that step.
     pub fn add_edge(&mut self, from: impl Into<String>, to: impl Into<String>) -> &mut Self {
         self.edges.push(Edge::Direct {
             from: from.into(),

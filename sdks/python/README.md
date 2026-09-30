@@ -26,12 +26,14 @@ cp -r sdks/python/rusty_client /your/project/
 
 ## Quickstart
 
-Start the demo server (scripted model — no network, no API keys):
+Start the demo server (scripted model — no network). The demo seeds a bootstrap administrator on first boot and requires sign-in; for a laptop or a test harness, `RUSTY_OPEN=1` runs it open instead:
 
 ```bash
-cargo run -p rusty-agent-server --example server_demo
+RUSTY_OPEN=1 cargo run -p rusty-agent-server --example server_demo
 # rusty-server demo on http://127.0.0.1:8100  (graphs: pipeline, react_agent)
 ```
+
+Without `RUSTY_OPEN=1`, sign in first: the generated admin password is written to a file next to the store (the path is logged at startup) — `POST /auth/login` gets you a session token. Note that `RUSTY_OPEN=1` only skips *creating* the admin; a store that already has users keeps requiring sign-in.
 
 Then, mirroring the curl quickstart from the server README:
 

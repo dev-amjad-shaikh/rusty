@@ -1,13 +1,21 @@
 //! End-to-end demo of the prebuilt ReAct agent (`create_react_agent`).
 //!
 //! Uses a **scripted** [`ChatModel`] (no network) and two toy tools
-//! (`calculator`, `echo`) to walk the full reasoning–acting loop:
+//! (`calculator`, `echo`) to walk the full reasoning–acting loop —
+//! including the approval gate that pauses the run before a
+//! non-idempotent tool executes:
 //!
 //! ```text
-//! user ──► agent (LLM: "I need tools") ──► tools (calculator + echo, in parallel)
-//!              ▲                                │
-//!              └────────── agent (LLM: final answer, sees tool results) ◄──┘
+//! user ──► agent (LLM: "I need tools") ──► ⏸ approval gate (run suspends)
+//!              ▲                                │  demo approves, run resumes
+//!              └──── agent (LLM: final answer, sees tool results) ◄── tools ◄─┘
 //! ```
+//!
+//! Both toy tools default to `Effect::NonIdempotent`, so the tools node
+//! interrupts with `{"kind": "approval", "requests": […]}` before either
+//! executes. A deployment surfaces that to a person; the demo plays the
+//! person, minting one `ApprovalToken` per request and resuming the same
+//! thread.
 //!
 //! Run with: `cargo run --example react_agent`
 
@@ -16,6 +24,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rusty_agent_runtime::prelude::*;
+use rusty_agent_runtime::react::APPROVAL_INTERRUPT_KIND;
 use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
@@ -236,14 +245,55 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 6. Run.
+    // 6. Run — and expect the approval gate to pause it. Both toy tools
+    //    default to `Effect::NonIdempotent`, so before either executes the
+    //    tools node suspends the run with the calls it wants approved.
+    //    Resuming needs the checkpoint the suspension wrote, so the
+    //    executor gets a checkpointer (in-memory here; a deployment uses
+    //    the durable one).
+    let executor = Executor::with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
     let config = RunConfig::new("react-demo")
         .with_max_steps(10)
-        .with_event_tx(tx);
-    let outcome = Executor::new().run(&graph, &spec, initial, config).await?;
-    drop(tracer); // the trace task ends once the sender is dropped
+        .with_event_tx(tx.clone());
+    let outcome = executor.run(&graph, &spec, initial, config).await?;
 
-    // 7. Print the final transcript.
+    // 7. Play the person the gate paused for: read what it asks about,
+    //    approve each call, and resume the SAME thread with the tokens.
+    //    The server surfaces this to a real operator; here the decision
+    //    is scripted like the model.
+    let outcome = match outcome {
+        ExecutionOutcome::Interrupted { ref value, .. }
+            if value.get("kind").and_then(Value::as_str) == Some(APPROVAL_INTERRUPT_KIND) =>
+        {
+            let requests = value["requests"].as_array().cloned().unwrap_or_default();
+            println!("\n=== run paused: approval gate ===");
+            let mut tokens = Vec::with_capacity(requests.len());
+            for req in &requests {
+                println!(
+                    "  approving {}({}) [call {}]",
+                    req["tool"], req["arguments"], req["call_id"]
+                );
+                let effect_id: EffectId = serde_json::from_value(req["effect_id"].clone())?;
+                tokens.push(ApprovalToken::approve(effect_id, "demo-operator"));
+            }
+            println!("\n=== resumed with {} approval(s) ===", tokens.len());
+            let resume = RunConfig::new("react-demo")
+                .with_max_steps(10)
+                .with_event_tx(tx.clone())
+                .with_effect_approvals(tokens)
+                .with_resume(json!({
+                    "kind": APPROVAL_INTERRUPT_KIND,
+                    "decision": "approve",
+                    "by": "demo-operator",
+                }));
+            executor.run(&graph, &spec, State::new(), resume).await?
+        }
+        other => other,
+    };
+    drop(tx); // both runs done — the trace task ends once the senders are gone
+    drop(tracer);
+
+    // 8. Print the final transcript.
     match &outcome {
         ExecutionOutcome::Done(state) => {
             println!("\n=== run finished: final transcript ===");

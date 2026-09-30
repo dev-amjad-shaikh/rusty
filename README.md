@@ -136,7 +136,7 @@ The recording is the demo server (`cargo run --example server_demo -p rusty-agen
 | Rusty Worker | [`rusty-worker/`](rusty-worker/) | Worker SDK: serves your node handlers over HTTP so `RemoteNode` can execute them remotely. |
 | Rusty OTel | [`rusty-otel/`](rusty-otel/) | One-call `tracing` subscriber setup with optional OTLP span export. |
 | Rusty Eval | [`rusty-eval/`](rusty-eval/) | Agent TestOps: versioned eval datasets, experiment reports, baseline-vs-candidate compare, statistical regression detection, model judge, failure clustering, release gates, human-feedback operations. |
-| Rusty Studio | [`studio/`](studio/) | Zero-build debug UI: connect, run, stream, inspect state and checkpoint history, fork and replay, Flight Recorder timeline with causal path and branch compare — plus the v4 React workspace (agents, work board, connectors, skills, knowledge, operations). |
+| Rusty Studio | [`studio/`](studio/) | The operator workspace (the v4 React app): a home view with recent runs and anything waiting on a decision, the agent builder, models, skills, tools, connectors, knowledge, evals, and observability. |
 | Rusty SDKs | [`sdks/python/`](sdks/python/) · [`sdks/typescript/`](sdks/typescript/) | Zero-dependency `rusty_client` (Python) and `@rusty-runtime/client` (TypeScript) clients for the server API. |
 
 Two support crates are not published: [`rusty-api/`](rusty-api/) — the dependency-light trait ABI extension crates compile against — and [`rusty-store/`](rusty-store/), the store abstraction behind the server backends.
@@ -188,7 +188,7 @@ Step-by-step guides to everything above — building an agent, a skill, a tool, 
 ## Documentation
 
 - [docs/building-agentic-products.md](docs/building-agentic-products.md) — what Rusty is precisely, the five-concept mental model, and the product-building path from local graph to deployed binary.
-- [docs/api/](docs/api/README.md) — the server's HTTP surface as an OpenAPI 3.1 spec: threads, runs, assistants, connectors, skills, knowledge, memory, evaluation.
+- [docs/api/](docs/api/README.md) — the server's core HTTP surface as an OpenAPI 3.1 spec: threads, runs, assistants, connectors, skills, knowledge, memory, evaluation. Covers 56 of the server's 297 routes today — the coverage note in that folder lists what is still undocumented.
 - [docs/architecture.md](docs/architecture.md) — the anatomy deep-dive: how one run flows through the engine, eight diagrams, the named failure modes.
 - [docs/how-to.md](docs/how-to.md) — build an agent, a skill, a tool, and add a connector, step by step, in Rusty Studio.
 - [docs/server-quickstart.md](docs/server-quickstart.md) — zero to a served graph with interrupt/resume over HTTP in ten minutes.

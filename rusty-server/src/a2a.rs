@@ -755,6 +755,38 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
     };
     let parent = journal.events().last().map(|event| event.id.clone());
 
+    // The overlay narrowing the resolve path journals must bind what the
+    // guest can link, or it narrows the evidence without narrowing the
+    // execution: build the host from the *effective* manifest — declared
+    // grants intersected with every applicable tenant overlay, the same
+    // arithmetic `compose_admission` runs, in the same order. Fail closed
+    // when the overlays cannot be read.
+    let mut manifest = record.manifest.clone();
+    let overlays_applied = match crate::capsule_policy::narrow_effective_grants(
+        &state.server_store,
+        tenant,
+        &mut manifest,
+    )
+    .await
+    {
+        Ok(applied) => applied,
+        Err(refusal) => {
+            drop(_guard);
+            fail(format!(
+                "tenant overlays could not be read; refusing closed: {refusal:?}"
+            ))
+            .await;
+            return;
+        }
+    };
+    if !overlays_applied.is_empty() {
+        tracing::info!(
+            capsule = %record.capsule_id,
+            overlays = %overlays_applied.join(", "),
+            "capsule executes under the tenant's effective (overlay-narrowed) grants"
+        );
+    }
+
     // Admission, the bridge half: the v1 world has no filesystem import,
     // so a guest cannot even name the capability — but the *caller* can
     // declare `requires: ["filesystem"]`, and the refusal must leave the
@@ -764,13 +796,12 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
         .get("requires")
         .and_then(Value::as_array)
         .is_some_and(|r| r.iter().any(|v| v.as_str() == Some("filesystem")));
-    if requires_fs && !any_grant_of_kind(&record.manifest.capabilities, CapabilityKind::Filesystem)
-    {
+    if requires_fs && !any_grant_of_kind(&manifest.capabilities, CapabilityKind::Filesystem) {
         let denial = CapsuleDenial::unscoped(
             record.capsule_id.clone(),
             CapabilityKind::Filesystem,
             "the caller requires `filesystem`, which the v1 world does not import and the \
-             manifest does not grant — refused at admission, before any guest code ran",
+             effective grants do not include — refused at admission, before any guest code ran",
         );
         if let Ok(output) = serde_json::to_value(&denial) {
             let mut draft = EventDraft::new(RunEventKind::CapsuleDenied, Effect::Pure)
@@ -791,7 +822,7 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
         return;
     }
 
-    let host = match CapsuleHost::from_bytes(record.manifest.clone(), &bytes) {
+    let host = match CapsuleHost::from_bytes(manifest, &bytes) {
         Ok(host) => host
             .with_connector(connector)
             .with_grant_recheck(state.capsule_plane.rechecker(tenant)),

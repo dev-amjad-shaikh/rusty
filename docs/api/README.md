@@ -5,11 +5,13 @@ builder surface: health and discovery, auth, threads, runs, assistants,
 connectors, skills, knowledge, memory, and evaluation (datasets +
 experiments).
 
-## Coverage — 56 of 295 routes today
+## Coverage — 56 of 297 routes today
 
-The server currently declares **295 routes** across roughly 55 resource
-families. This spec deliberately covers the core first (56 operations on 49
-paths). Undocumented today:
+The server currently serves **297 routes** across roughly 55 resource
+families (the authorization scope table declares 361 method+path pairs,
+which includes management surfaces mounted outside the core router). This
+spec deliberately covers the core first (56 operations on 49 paths).
+Undocumented today:
 
 - approvals, plugins, receipts, receipt keys, broker, connections
 - OIDC and SCIM configuration, users

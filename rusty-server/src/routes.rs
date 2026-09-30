@@ -708,6 +708,11 @@ fn build_scope_table() -> ScopeTable {
         "/tasks/{task_id}/cancel",
         Scope::parse("tasks:cancel").unwrap(),
     );
+    table.declare(
+        "POST",
+        "/tasks/{task_id}/redrive",
+        Scope::parse("tasks:redrive").unwrap(),
+    );
     table.declare("POST", "/agents", Scope::parse("agents:write").unwrap());
     table.declare("GET", "/agents", Scope::parse("agents:read").unwrap());
     table.declare(
@@ -1920,6 +1925,16 @@ pub(crate) fn build_router(
     // that has, or is about to have, users requires everyone to be somebody
     // from the first request — never a window where it is open.
     let auth_required = config.auth_enabled() || config.bootstrap_admin || !users.is_empty();
+    // Open mode cannot retire a server's people: once the store has users,
+    // sign-in is required no matter how open the config asks to be. Say so
+    // out loud — a silent override reads as a bug (RUSTY_OPEN=1 on a store
+    // that already has users is the common way to hit this).
+    if !config.auth_enabled() && !users.is_empty() {
+        tracing::warn!(
+            "the store already has users, so sign-in is required; open mode \
+             (RUSTY_OPEN=1) cannot disable authentication once users exist"
+        );
+    }
     let worlds = Arc::new(crate::worlds::WorldPlane::new(Arc::clone(&server_store)));
     let state = Arc::new(AppState {
         worlds,
@@ -2470,6 +2485,7 @@ pub(crate) fn build_router(
         .route("/tasks/{task_id}/complete", post(complete_task))
         .route("/tasks/{task_id}/fail", post(fail_task))
         .route("/tasks/{task_id}/cancel", post(cancel_task))
+        .route("/tasks/{task_id}/redrive", post(redrive_task))
         .route("/agents", post(create_agent).get(list_agents))
         .route("/agents/{agent_id}", get(get_agent))
         .route("/agents/{agent_id}/mailbox", post(send_agent_message))
@@ -9206,8 +9222,11 @@ struct FailTaskPayload {
     error_class: String,
     /// The failure message, stored as the task's `last_error`.
     message: String,
-    /// The worker's permanence judgment: `false` dead-letters immediately,
-    /// regardless of remaining attempts.
+    /// The worker's permanence judgment: `false` declares re-driving the
+    /// same input unsafe, so the effect gate fails the task outright —
+    /// terminal `failed`, never retried, never dead-lettered (the DLQ is
+    /// for actionable work; there is nothing a human can fix by re-driving
+    /// an input the worker called unsafe).
     retryable: bool,
     /// Settlement cost evidence (R0.7 wave 3): what the failed attempt
     /// consumed, when the worker knows. A race loser's reported waste
@@ -14840,6 +14859,40 @@ fn pool_metrics_json(
         "lease_saturation": limit.map(|max| stat.leased as f64 / max.max(1) as f64),
         "oldest_visible_task_age_ms": oldest_age_ms,
     })
+}
+
+/// `POST /tasks/{id}/redrive` — re-queue a dead-lettered task → `200` with
+/// the updated record. Operator remediation, not the retry policy's
+/// business: the task returns to `queued` with its input, idempotency key,
+/// and full attempt history intact, so the next claim hands it out as one
+/// more attempt — the burned budget stays burned, and a failed re-driven
+/// attempt dead-letters again (`TaskRecord::redrive`). `409` when the task
+/// is not in the DLQ, `404` for unknown or cross-tenant ids.
+async fn redrive_task(
+    AxumState(state): AxumState<Arc<AppState>>,
+    Extension(tenant): Extension<TenantContext>,
+    Path(task_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let outcome = state
+        .server_store
+        .redrive_task(tenant.tenant(), &task_id, Utc::now())
+        .await
+        .map_err(internal_err)?;
+    match outcome {
+        crate::tasks::RedriveOutcome::Applied(task) => {
+            // A2A bridge: fan the re-queue out to any live `message/stream`
+            // attachment. A no-op for non-A2A tasks.
+            crate::a2a::publish_task_update(&state, &task).await;
+            Ok(Json(task.wire()))
+        }
+        crate::tasks::RedriveOutcome::NotDead(status) => Err(ApiError::conflict(format!(
+            "task `{task_id}` is not in the dead-letter queue ({}) and cannot be re-driven",
+            status.as_str()
+        ))),
+        crate::tasks::RedriveOutcome::Unknown => {
+            Err(ApiError::not_found(format!("task `{task_id}` not found")))
+        }
+    }
 }
 
 /// `GET /tasks/{id}` — the task record (tenant-scoped; unknown or

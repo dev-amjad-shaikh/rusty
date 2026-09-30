@@ -12,8 +12,9 @@
 //! elapsed whole-task deadlines instead of re-leasing. The retry policy is
 //! not local: failed attempts are
 //! classified into core's shared [`ErrorClass`] taxonomy and decided by
-//! core's [`classify_retry_with_policy`] — the same classifier the worker
-//! SDK runs — against the acting executor policy's resolved retry
+//! core's [`classify_retry_with_policy`] — the worker SDK reports failures
+//! in the same taxonomy, and only the server runs the classifier — against
+//! the acting executor policy's resolved retry
 //! parameters (R0.10 wave 4; the static floor resolves to exactly the
 //! pre-wave-4 constants), so
 //! server and workers can never disagree about a retry (see
@@ -584,6 +585,27 @@ impl TaskRecord {
         }
     }
 
+    /// Re-drive a dead-lettered task (operator remediation, not the retry
+    /// policy's business): the task re-queues as it stands — idempotency
+    /// key, input, and full attempt history intact — so the next claim
+    /// hands it out as one more attempt. The attempt counter is NOT
+    /// reset: the budget it already burned stays burned, and a failed
+    /// re-driven attempt dead-letters again (`attempt >= max_attempts`
+    /// decides before any backoff is drawn). Re-driving says "the cause
+    /// is fixed, try it once more" — it never grants a fresh budget.
+    /// Answers `false` for anything not currently `dead`.
+    pub(crate) fn redrive(&mut self, now: DateTime<Utc>) -> bool {
+        if self.status != TaskStatus::Dead {
+            return false;
+        }
+        self.status = TaskStatus::Queued;
+        self.status_category = StatusCategory::Todo;
+        self.lease = None;
+        self.next_attempt_at = None;
+        self.updated_at = now;
+        true
+    }
+
     /// The terminal transition shared by [`Self::cancel`] and the claim
     /// path's finalization sweep. The lease and any retry schedule are
     /// cleared so nothing re-queues; `error_class` records *why* the task
@@ -757,6 +779,21 @@ pub(crate) enum CancelOutcome {
     /// The task exists but is already terminal; carries its status for the
     /// 409 message.
     Terminal(TaskStatus),
+    /// No such task in this tenant (unknown or cross-tenant id). Routes
+    /// answer 404.
+    Unknown,
+}
+
+/// What a DLQ re-drive (`POST /tasks/{id}/redrive`) did. Like
+/// [`CancelOutcome`], not lease-guarded — the re-driver is the tenant's
+/// control plane.
+#[derive(Debug, Clone)]
+pub(crate) enum RedriveOutcome {
+    /// The task left the dead-letter queue and is queued again.
+    Applied(Box<TaskRecord>),
+    /// The task exists but is not in the dead-letter queue; carries its
+    /// status for the 409 message.
+    NotDead(TaskStatus),
     /// No such task in this tenant (unknown or cross-tenant id). Routes
     /// answer 404.
     Unknown,

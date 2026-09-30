@@ -195,7 +195,10 @@ classes (`invalid_input`) and non-repeatable effects do **not** dead-letter
 — they `fail` immediately, because re-driving the same input fixes nothing
 and the DLQ is for actionable work, not a graveyard. DLQ entries keep the
 full envelope plus the attempt history (classes, decisions, timings) as
-evidence; operators inspect them, fix the cause, and re-drive by hand.
+evidence; operators inspect them, fix the cause, and re-drive by hand
+(`POST /tasks/{id}/redrive`: the task re-queues with its history intact —
+one more attempt, not a fresh budget, so a failed re-drive dead-letters
+again).
 `cancelled` never enters the DLQ. Tenant quotas (wave 3) count DLQ depth
 against the tenant — an unbounded DLQ is a quiet disk-full outage.
 

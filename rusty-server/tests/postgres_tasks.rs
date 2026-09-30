@@ -320,6 +320,95 @@ async fn postgres_lease_expiry_reclaims_and_tenants_are_isolated() {
 
 #[tokio::test]
 #[ignore = "requires a live Postgres (DATABASE_URL)"]
+async fn postgres_redrive_matches_the_file_backends_semantics() {
+    let app = postgres_app();
+    // Tests in this file share one scratch database and run concurrently;
+    // a unique pool per test keeps claims from stealing each other's tasks.
+    let pool = format!("redrive-{}", uniq());
+
+    // Dead-letter a task: one attempt, one classified failure.
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/tasks",
+        Some(json!({"kind": "k", "payload": {}, "pool": pool,
+                    "max_attempts": 1,
+                    "idempotency_key": format!("redrive-{}", uniq())})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "enqueue failed: {v}");
+    let task_id = v["task_id"].as_str().unwrap().to_string();
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/tasks/claim",
+        Some(json!({"worker_id": "pg-worker", "pools": [pool], "lease_ms": 60_000})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "claim failed: {v}");
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/tasks/{task_id}/fail"),
+        Some(json!({"worker_id": "pg-worker", "error_class": "unknown",
+                    "message": "gave up", "retryable": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "fail failed: {v}");
+    assert_eq!(v["dead"], json!(true), "setup: the task dead-letters");
+
+    // Re-drive: queued again, evidence and the burned budget intact.
+    let (status, v) = call(&app, "POST", &format!("/tasks/{task_id}/redrive"), None).await;
+    assert_eq!(status, StatusCode::OK, "redrive failed: {v}");
+    assert_eq!(v["status"], json!("queued"));
+    assert_eq!(v["error_class"], json!("unknown"));
+    assert_eq!(v["attempt"], json!(1));
+
+    // Claimable again, and the re-driven attempt re-dead-letters on
+    // failure — one more attempt, never a fresh budget.
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/tasks/claim",
+        Some(json!({"worker_id": "pg-worker-2", "pools": [pool], "lease_ms": 60_000})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "re-driven task must be claimable: {v}"
+    );
+    assert_eq!(v["task"]["task_id"], json!(task_id));
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/tasks/{task_id}/fail"),
+        Some(json!({"worker_id": "pg-worker-2", "error_class": "unknown",
+                    "message": "still broken", "retryable": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["dead"], json!(true));
+
+    // A task not in the DLQ cannot be re-driven; unknown ids are 404.
+    let (status, v) = call(
+        &app,
+        "POST",
+        "/tasks",
+        Some(json!({"kind": "k", "payload": {}, "pool": pool,
+                    "idempotency_key": format!("redrive-live-{}", uniq())})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "enqueue failed: {v}");
+    let live = v["task_id"].as_str().unwrap().to_string();
+    let (status, _) = call(&app, "POST", &format!("/tasks/{live}/redrive"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = call(&app, "POST", "/tasks/nope/redrive", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[ignore = "requires a live Postgres (DATABASE_URL)"]
 async fn postgres_cancel_matches_the_file_backends_semantics() {
     let app = postgres_app();
     // Tests in this file share one scratch database and run concurrently;

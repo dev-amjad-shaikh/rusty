@@ -459,8 +459,10 @@ regression guards; new `*_delta` groups measure the new path, and a
 
 ### Exit metric 1 — snapshot cost per super-step
 
-`State::clone()` is now one refcount bump per channel — O(channels), flat in
-payload size. The `superstep_snapshot_clones` group measures the executor's
+`State::clone()` is now one atomic refcount bump — O(1), flat in both
+channel count and payload size, which is what the flat ~4 ns column below
+shows. Per-channel refcount bumps happen only later, when a *shared* map is
+first written (`Arc::make_mut` per channel). The `superstep_snapshot_clones` group measures the executor's
 actual per-step fan-out (pre-step snapshot + 4 node clones + checkpoint
 copy = 6 clones); pre-wave 4 that cost 6 × the full-clone column.
 

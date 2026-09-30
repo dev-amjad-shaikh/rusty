@@ -498,6 +498,59 @@ async fn exhausted_attempts_dead_letter_and_the_dlq_lists_them() {
 }
 
 #[tokio::test]
+async fn redrive_requeues_a_dead_task_for_one_more_attempt() {
+    let (app, store) = app();
+    let task_id = enqueue(&app, json!({"max_attempts": 1})).await;
+    claim_one(&app, "w", 30_000).await;
+    let (_, v) = call(
+        &app,
+        "POST",
+        &format!("/tasks/{task_id}/fail"),
+        Some(json!({"worker_id": "w", "error_class": "unknown",
+                    "message": "gave up", "retryable": true})),
+    )
+    .await;
+    assert_eq!(v["dead"], json!(true), "setup: the task dead-letters");
+
+    // The operator fixes the cause and re-drives: queued again, with the
+    // evidence of what killed it and the burned attempt budget intact.
+    let (status, v) = call(&app, "POST", &format!("/tasks/{task_id}/redrive"), None).await;
+    assert_eq!(status, StatusCode::OK, "redrive failed: {v}");
+    assert_eq!(v["status"], json!("queued"));
+    assert_eq!(v["error_class"], json!("unknown"));
+    assert_eq!(v["attempt"], json!(1));
+
+    // The re-driven task is claimable again...
+    let claimed = claim_one(&app, "w2", 30_000).await;
+    assert_eq!(claimed["task_id"], json!(task_id));
+
+    // ...and a failure of the re-driven attempt dead-letters again:
+    // re-drive grants one more attempt, never a fresh budget.
+    let (status, v) = call(
+        &app,
+        "POST",
+        &format!("/tasks/{task_id}/fail"),
+        Some(json!({"worker_id": "w2", "error_class": "unknown",
+                    "message": "still broken", "retryable": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        v["dead"],
+        json!(true),
+        "the re-driven attempt re-dead-letters on failure"
+    );
+
+    // A task not in the DLQ cannot be re-driven; unknown ids are 404.
+    let live = enqueue(&app, json!({})).await;
+    let (status, _) = call(&app, "POST", &format!("/tasks/{live}/redrive"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = call(&app, "POST", "/tasks/nope/redrive", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let _ = std::fs::remove_dir_all(store);
+}
+
+#[tokio::test]
 async fn outright_failures_never_dead_letter() {
     let (app, store) = app();
 

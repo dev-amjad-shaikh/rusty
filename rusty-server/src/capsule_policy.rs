@@ -426,8 +426,9 @@ pub use engine::{CapsulePolicyError, CapsulePolicyPlane};
 #[cfg(feature = "capsules")]
 pub(crate) use engine::{
     activation, authorize_overlay_attach, authorize_registration, compose_admission,
-    derive_capsule_policy_version, load_config_policies, preload_active_policies,
-    prospective_record, validate_capsule_policy_version, AdmissionRefusal, CedarEngine,
+    derive_capsule_policy_version, load_config_policies, narrow_effective_grants,
+    preload_active_policies, prospective_record, validate_capsule_policy_version, AdmissionRefusal,
+    CedarEngine,
 };
 
 #[cfg(feature = "capsules")]
@@ -1064,6 +1065,38 @@ mod engine {
             .reduce(f64::min)
     }
 
+    /// The structural half of admission on its own: intersect the
+    /// manifest's declared grants with every applicable tenant overlay,
+    /// in canonical name order, mutating the manifest to the effective
+    /// set and returning the names of the overlays that applied.
+    ///
+    /// Shared with execution paths that never pass through
+    /// [`compose_admission`]: the A2A bridge builds its host from the
+    /// manifest it is handed, so the narrowing must travel *in* the
+    /// manifest — evidence of a narrowing the host never enforced would
+    /// be a lie.
+    pub(crate) async fn narrow_effective_grants(
+        store: &Arc<dyn ServerStore>,
+        tenant: &str,
+        manifest: &mut CapsuleManifest,
+    ) -> Result<Vec<String>, AdmissionRefusal> {
+        let mut tenant_overlays = store
+            .list_capsule_overlays(tenant)
+            .await
+            .map_err(AdmissionRefusal::Internal)?;
+        tenant_overlays.sort_by(|a, b| a.overlay.name.cmp(&b.overlay.name));
+        let mut applied = Vec::new();
+        for overlay_record in &tenant_overlays {
+            if overlay_record.overlay.applies_to(&manifest.identity.name) {
+                manifest.capabilities = overlay_record
+                    .overlay
+                    .effective_grants(&manifest.capabilities);
+                applied.push(overlay_record.overlay.name.clone());
+            }
+        }
+        Ok(applied)
+    }
+
     /// The admission composition (R0.9 wave 2): Cedar decisions 1 and 2,
     /// then the structural overlay narrowing, then the budget clamp —
     /// in that order, because Cedar judges the guest's *declaration*
@@ -1142,26 +1175,12 @@ mod engine {
         // is the double enforcement's arithmetic half — an overlay
         // hand-crafted past the policy plane still cannot widen the
         // effective set.
-        let mut tenant_overlays = store
-            .list_capsule_overlays(tenant)
-            .await
-            .map_err(AdmissionRefusal::Internal)?;
-        tenant_overlays.sort_by(|a, b| a.overlay.name.cmp(&b.overlay.name));
-        let mut overlays_applied = Vec::new();
-        let mut effective = record.manifest.capabilities.clone();
-        for overlay_record in &tenant_overlays {
-            if overlay_record
-                .overlay
-                .applies_to(&record.manifest.identity.name)
-            {
-                effective = overlay_record.overlay.effective_grants(&effective);
-                overlays_applied.push(overlay_record.overlay.name.clone());
-            }
-        }
+        let mut narrowed = record.manifest.clone();
+        let overlays_applied = narrow_effective_grants(store, tenant, &mut narrowed).await?;
         let (overlays, effective_grants) = if overlays_applied.is_empty() {
             (None, None)
         } else {
-            (Some(overlays_applied), Some(effective))
+            (Some(overlays_applied), Some(narrowed.capabilities))
         };
 
         // Budget composition: the declared budget clamped field-wise

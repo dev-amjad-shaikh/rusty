@@ -46,9 +46,9 @@ type ChannelMap = BTreeMap<String, Arc<Value>>;
 ///
 /// Every channel value sits behind an [`Arc`], and the channel map itself
 /// behind another. Cloning a `State` — the executor's per-super-step
-/// snapshot, each node's private copy, the checkpoint's copy — is two
-/// refcount bumps, O(1) in the state's size, where it used to be a deep
-/// clone of every channel. A write (a reducer merge at the barrier, an
+/// snapshot, each node's private copy, the checkpoint's copy — is one
+/// atomic refcount bump, O(1) in the state's size, where it used to be a
+/// deep clone of every channel. A write (a reducer merge at the barrier, an
 /// engine [`State::insert`]) touches only what it must: the map is cloned
 /// shallowly when shared (one refcount bump per channel), and a channel's
 /// value is cloned only when some other `State` still shares it —
@@ -588,10 +588,12 @@ impl StateSpec {
     ///    rejected with [`RustyError::InvalidUpdate`] rather than
     ///    silently discarded.
     /// 4. Surviving writes are merged via the channel reducer in
-    ///    **deterministic order: sorted by node name**. The executor
-    ///    collects writes from concurrently completing tasks, so callers
-    ///    cannot rely on input order; canonicalizing here keeps fan-in
-    ///    results (and checkpoints derived from them) stable run-to-run.
+    ///    **deterministic order: sorted by node name**. The sort is stable,
+    ///    so writes from several fan-out invocations of one node — which
+    ///    share a name — keep the caller's input order, and the executor
+    ///    feeds them in active-set (Send) order rather than task-finish
+    ///    order. Fan-in results and the checkpoints derived from them are
+    ///    stable run-to-run, same-node fan-outs included.
     ///
     /// Validation completes before any mutation: on error the state is left
     /// entirely unmodified and the caller (executor) should abort the

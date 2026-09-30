@@ -24,17 +24,14 @@ store under `backups/wal/{timeline}/`.  Archiving is synchronous with respect
 to the Postgres transaction commit when `synchronous_commit = remote_apply` is
 configured, giving an RPO of zero for committed events.
 
-## Archive lag metric and alert
+## Archive lag monitoring and alert
 
-The `rustyness` exporter exposes:
-
-```
-rusty_backup_archive_lag_seconds{tenant="..."}
-```
-
-This is the wall-clock time between the last WAL segment successfully archived
-and the current Postgres `pg_current_wal_lsn()`.  An alert fires when the lag
-exceeds the configured bound (default: 60 seconds).
+Archive lag is the wall-clock time between the last WAL segment successfully
+archived and the current Postgres `pg_current_wal_lsn()`. Rusty does not export
+a metric for it — archiving happens inside Postgres, so measure it from your
+Postgres monitoring (a `postgres_exporter` custom query or your managed
+database's built-in WAL metrics) and alert when the lag exceeds the configured
+bound (60 seconds is a reasonable default).
 
 ## Object-store bucket versioning
 
@@ -44,7 +41,9 @@ application setting; it must be confirmed at deployment time.
 
 ## Verification
 
-After every base backup, the restore-rehearsal CI job (see `docs/recovery.md`)
-restores the backup to a fresh environment and runs `rustyness verify-log` to
+After every base backup, rehearse the restore (see `docs/recovery.md`):
+restore the backup to a fresh environment and run `rustyness verify-log` to
 confirm that journal snapshots are intact and that every artifact reference
-resolves.
+resolves. Automating this as a scheduled CI job is the intent; that job does
+not exist yet, so today this is a procedure to run, not a gate that runs
+itself.
