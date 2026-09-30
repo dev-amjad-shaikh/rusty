@@ -120,9 +120,13 @@ pub struct RunConfig {
     /// checkpoints for this run. Required for persistence and resume.
     pub thread_id: String,
 
-    /// Maximum number of super-steps before the run aborts with
-    /// [`crate::error::RustyError::Graph`] (the LangGraph
-    /// `recursion_limit` / `GraphRecursionError` guard). Default: 1000.
+    /// Maximum number of super-steps before the run stops at the ceiling —
+    /// the LangGraph `recursion_limit` guard. Reaching it does not throw the
+    /// work away: the run suspends exactly as an interrupt does
+    /// ([`ExecutionOutcome::Interrupted`], payload `rusty.halted` with
+    /// reason `step_ceiling`), the checkpoint is written, and resuming the
+    /// thread carries on — raise `max_steps` on the resume when that is
+    /// what the run needs. Default: 1000.
     pub max_steps: usize,
 
     /// Resume value for continuing an interrupted run. When set, the
@@ -1839,7 +1843,15 @@ impl Executor {
         // -- barrier: collect every node result. The step is
         //    transactional: on any failure the JoinSet is dropped
         //    (aborting stragglers) and the step's writes are discarded.
-        let mut writes: Vec<(String, HashMap<String, Value>)> = Vec::new();
+        //
+        // Writes carry the invocation's active-set index so the barrier
+        // merge can be ordered by it: a fan-out's several invocations of
+        // one node share a name, and the name sort in
+        // `StateSpec::apply_super_step` alone would leave their Append
+        // order to task-finish timing. Index order is the Send order the
+        // route decided — deterministic, and the same order the journal
+        // records outputs in.
+        let mut writes: Vec<(usize, String, HashMap<String, Value>)> = Vec::new();
         let mut commands: Vec<Command> = Vec::new();
         let mut ran_nodes: Vec<String> = Vec::new();
         let mut interrupted: Option<(usize, String, Value)> = None;
@@ -1877,7 +1889,7 @@ impl Executor {
                         }
                     }
                     ran_nodes.push(name.clone());
-                    writes.push((name, output.updates));
+                    writes.push((index, name, output.updates));
                 }
                 Err(RustyError::Interrupt { value }) => {
                     // Record the suspension and stop the barrier loop; the
@@ -2011,9 +2023,18 @@ impl Executor {
         // checkpoint still shares reach the reducer with refcount 1 and
         // merge in place (W4 copy-on-write) instead of cloning.
         drop(snapshot);
+        // Order the merge by active-set index before handing writes to the
+        // reducers: `apply_super_step` sorts by node name with a stable
+        // sort, so this is what fixes the Append order of a fan-out's
+        // same-node writes to the Send order instead of finish timing.
+        writes.sort_by_key(|(index, ..)| *index);
         let written_channels: HashSet<String> = writes
             .iter()
-            .flat_map(|(_, updates)| updates.keys().cloned())
+            .flat_map(|(_, _, updates)| updates.keys().cloned())
+            .collect();
+        let writes: Vec<(String, HashMap<String, Value>)> = writes
+            .into_iter()
+            .map(|(_, name, updates)| (name, updates))
             .collect();
         spec.apply_super_step(state, writes)?;
         // The event carries the post-reducer values read back out of the
@@ -2621,6 +2642,61 @@ mod tests {
         merged.sort_unstable();
         // Both partial writes are visible in the single post-reducer value.
         assert_eq!(merged, ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn fan_out_writes_merge_in_send_order_not_finish_order() {
+        // A fan-out's invocations of one node share a name, so the barrier
+        // merge's stable name sort alone would leave their Append order to
+        // task-finish timing. The executor orders writes by active-set
+        // index first, so the merged channel reads in Send order even when
+        // the last Send finishes first.
+        let spec = StateSpec::new()
+            .channel("item", Reducer::Overwrite)
+            .channel("results", Reducer::Append);
+
+        let mut builder = GraphBuilder::new();
+        builder.add_node("seed", |_ctx: NodeContext| async {
+            Ok(NodeOutput::update("item", json!(0)))
+        });
+        builder.add_node("worker", |ctx: NodeContext| async move {
+            let item = ctx.state().get("item").and_then(Value::as_u64).unwrap();
+            // Later Sends finish earlier: finish order is the reverse of
+            // Send order.
+            tokio::time::sleep(std::time::Duration::from_millis((4 - item) * 100)).await;
+            Ok(NodeOutput::update("results", json!(item)))
+        });
+        builder.set_entry_point("seed");
+        builder.add_conditional_edges("seed", |_state| async move {
+            Ok(Route::Send(vec![
+                crate::graph::Send::new("worker", json!({ "item": 0 })),
+                crate::graph::Send::new("worker", json!({ "item": 1 })),
+                crate::graph::Send::new("worker", json!({ "item": 2 })),
+                crate::graph::Send::new("worker", json!({ "item": 3 })),
+            ]))
+        });
+        let graph = builder.compile().unwrap();
+
+        let outcome = Executor::new()
+            .run(
+                &graph,
+                &spec,
+                State::new(),
+                RunConfig::new("t-send-order"),
+            )
+            .await
+            .unwrap();
+        let ExecutionOutcome::Done(state) = outcome else {
+            panic!("expected Done");
+        };
+        let results: Vec<u64> = state
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results channel present")
+            .iter()
+            .map(|v| v.as_u64().unwrap())
+            .collect();
+        assert_eq!(results, [0, 1, 2, 3]);
     }
 
     #[tokio::test]
