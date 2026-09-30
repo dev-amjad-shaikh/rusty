@@ -1920,6 +1920,16 @@ pub(crate) fn build_router(
     // that has, or is about to have, users requires everyone to be somebody
     // from the first request — never a window where it is open.
     let auth_required = config.auth_enabled() || config.bootstrap_admin || !users.is_empty();
+    // Open mode cannot retire a server's people: once the store has users,
+    // sign-in is required no matter how open the config asks to be. Say so
+    // out loud — a silent override reads as a bug (RUSTY_OPEN=1 on a store
+    // that already has users is the common way to hit this).
+    if !config.auth_enabled() && !users.is_empty() {
+        tracing::warn!(
+            "the store already has users, so sign-in is required; open mode \
+             (RUSTY_OPEN=1) cannot disable authentication once users exist"
+        );
+    }
     let worlds = Arc::new(crate::worlds::WorldPlane::new(Arc::clone(&server_store)));
     let state = Arc::new(AppState {
         worlds,

@@ -1630,7 +1630,8 @@ pub async fn serve_with_shutdown(
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "refusing to serve production without authentication: configure \
-             `with_api_key`/`with_tenant_key`, or unset RUSTY_ENV=production for a dev server",
+             `with_api_key`/`with_tenant_key`, `with_principal`, or \
+             `with_bootstrap_admin`, or unset RUSTY_ENV=production for a dev server",
         ));
     }
     // Open (dev) mode on a non-loopback address exposes the full API — run
