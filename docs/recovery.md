@@ -9,15 +9,20 @@ asserted.
 | Scenario | RPO | Basis |
 |---|---|---|
 | Committed events | **Zero** | `synchronous_commit = remote_apply` guarantees that an acknowledged commit is on durable WAL on the standby before the client receives success. |
-| Archive lag | **≤ 60 s** | The `rusty_backup_archive_lag_seconds` metric is alerted at this bound; actual lag is published beside the objective. |
+| Archive lag | **≤ 60 s** | Deployment-side WAL-archive monitoring is alerted at this bound (see `docs/backup.md`); Rusty does not export this metric itself. |
 | Object-store blob | **Zero** | Bucket versioning retains every version; a deleted blob is recoverable. |
 
 ## RTO — Recovery Time Objective
 
+These are **targets**, not measurements. A scheduled restore-rehearsal job
+that would publish actual timings does not exist yet; until it does, treat the
+numbers below as the bar a rehearsal must clear, and run the restore procedure
+by hand on a schedule.
+
 | Topology | Target RTO | Measurement |
 |---|---|---|
-| Single-node (development / small production) | **≤ 30 minutes** | Measured by the scheduled restore-rehearsal CI job: backup → destroy → restore → `verify-log` → replay seeded sessions. The time is published as a CI artifact. |
-| HA topology (M4) | **≤ 5 minutes** | Measured by the kill-a-node drill in `rusty-server/tests/fault_injection.rs`; worker failover plus lease re-acquisition is timed and bounded. |
+| Single-node (development / small production) | **≤ 30 minutes** | Rehearse by hand: backup → destroy → restore → `rustyness verify-log` → replay seeded sessions, and time it. |
+| HA topology (M4) | **≤ 5 minutes** | The kill-a-node drill in `rusty-server/tests/fault_injection.rs` exercises worker failover and lease re-acquisition. |
 
 ## Restore procedure
 
@@ -37,6 +42,7 @@ windows are recomputable projections; the log is the sole source of truth.
 
 ## Honesty
 
-RPO and RTO are not marketing numbers.  The rehearsal job publishes its timing
-on every run; if the measured RTO exceeds the target, the job fails and the
-deployment team is paged.
+RPO and RTO are targets, not published measurements. The rehearsal job that
+would publish timings — and fail when a measured RTO misses its target — is
+not wired yet; the restore procedure above is the rehearsal, run it on a
+schedule and record what you measure.

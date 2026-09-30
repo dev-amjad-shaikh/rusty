@@ -134,7 +134,7 @@ cargo build -p rusty-agent-server --example server_demo
 node --test test/
 ```
 
-The suite has two halves. `test/client.test.js` is e2e: it spawns the real `server_demo` binary (it binds `127.0.0.1:8100`, so that port must be free), polls `/ok`, exercises the full API — threads, blocking/background/streamed runs, SSE frame collection, fork + checkpoint replay, assistants, crons, KV CRUD, error shapes, timeouts — then kills the child and removes its scratch store. The 401 test self-skips because the demo binary runs with auth disabled. `test/tasks.test.js` is no-I/O: the tasks control plane (`client.tasks`) is exercised against a fake `fetch`, so it runs without the server — `node --test test/tasks.test.js`.
+The suite has two halves. `test/client.test.js` is e2e: it spawns the real `server_demo` binary with `RUSTY_OPEN=1` (it binds `127.0.0.1:8100`, so that port must be free), polls `/ok`, exercises the full API — threads, blocking/background/streamed runs, SSE frame collection, fork + checkpoint replay, assistants, crons, KV CRUD, error shapes, timeouts — then kills the child and removes its scratch store. The 401 test self-skips because that harness runs with auth disabled. `test/tasks.test.js` is no-I/O: the tasks control plane (`client.tasks`) is exercised against a fake `fetch`, so it runs without the server — `node --test test/tasks.test.js`.
 
 ## License
 
