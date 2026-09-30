@@ -30,12 +30,18 @@ services:
             && rm -rf /var/lib/apt/lists/*
         WORKDIR /app
         # Virtual workspace: the root manifest plus all member crates must be
-        # present or cargo refuses to load the workspace.
+        # present or cargo refuses to load the workspace, and the server's
+        # built-in plugin catalog is `include_bytes!`ed from catalog/.
         COPY Cargo.toml ./
+        COPY rusty-api/ rusty-api/
         COPY rusty-core/ rusty-core/
         COPY rusty-server/ rusty-server/
         COPY rusty-worker/ rusty-worker/
         COPY rusty-otel/ rusty-otel/
+        COPY rusty-eval/ rusty-eval/
+        COPY rusty-store/ rusty-store/
+        COPY rusty-store-conformance/ rusty-store-conformance/
+        COPY catalog/ catalog/
         # Debug build on purpose: this image is the one-command demo stack,
         # not a production artifact, and a release build multiplies build time
         # for no demo-visible benefit. Cache mounts keep the cargo registry
