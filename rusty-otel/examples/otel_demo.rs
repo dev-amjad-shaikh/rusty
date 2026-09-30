@@ -5,7 +5,9 @@
 //!
 //! 1. a minimal 2-node pipeline graph (`fetch` → `summarize`), and
 //! 2. the prebuilt ReAct agent with a scripted mock [`ChatModel`]
-//!    (no network), walking the full reason → act → reason loop.
+//!    (no network), walking the full reason → act → reason loop —
+//!    pausing at the approval gate for the non-idempotent toy tool,
+//!    approved programmatically, then resumed to the final answer.
 //!
 //! What you see depends on whether an OTLP endpoint is configured:
 //!
@@ -163,14 +165,49 @@ async fn run_react() -> Result<()> {
         json!([serde_json::to_value(ChatMessage::user("What is 17 * 3?"))?]),
     );
 
-    let outcome = Executor::new()
-        .run(
-            &graph,
-            &spec,
-            initial,
-            RunConfig::new("react-demo").with_max_steps(10),
-        )
-        .await?;
+    let outcome = {
+        // The approval gate rides every run: `Calculator` defaults to
+        // `Effect::NonIdempotent`, so the tools node suspends the run
+        // before executing. Mint the token and resume the same thread —
+        // the resume needs the suspension's checkpoint, hence the
+        // checkpointer.
+        let executor = Executor::with_checkpointer(Arc::new(InMemoryCheckpointer::new()));
+        let outcome = executor
+            .run(
+                &graph,
+                &spec,
+                initial,
+                RunConfig::new("react-demo").with_max_steps(10),
+            )
+            .await?;
+        match outcome {
+            ExecutionOutcome::Interrupted { ref value, .. } if value["kind"] == "approval" => {
+                let requests = value["requests"].as_array().cloned().unwrap_or_default();
+                let mut tokens = Vec::with_capacity(requests.len());
+                for req in &requests {
+                    println!("[react] approving {} [call {}]", req["tool"], req["call_id"]);
+                    let effect_id: EffectId = serde_json::from_value(req["effect_id"].clone())?;
+                    tokens.push(ApprovalToken::approve(effect_id, "otel-demo"));
+                }
+                executor
+                    .run(
+                        &graph,
+                        &spec,
+                        State::new(),
+                        RunConfig::new("react-demo")
+                            .with_max_steps(10)
+                            .with_effect_approvals(tokens)
+                            .with_resume(json!({
+                                "kind": "approval",
+                                "decision": "approve",
+                                "by": "otel-demo",
+                            })),
+                    )
+                    .await?
+            }
+            other => other,
+        }
+    };
 
     if let ExecutionOutcome::Done(state) = outcome {
         let messages: Vec<ChatMessage> = state.get_as("messages")?.expect("messages channel");
