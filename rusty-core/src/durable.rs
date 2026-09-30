@@ -169,9 +169,10 @@ pub enum RetryDecision {
 
     /// Move the task to the dead-letter queue: a retryable failure class
     /// whose attempts are exhausted, or an `Unknown` failure that kept
-    /// recurring. DLQ entries are operator-visible evidence — they carry the
-    /// full attempt history and can be re-driven by hand after the cause is
-    /// fixed.
+    /// recurring. DLQ entries are operator-visible evidence — they carry
+    /// the full attempt history and can be re-driven by hand
+    /// (`POST /tasks/{id}/redrive`) after the cause is fixed; a re-driven
+    /// task gets one more attempt, not a fresh budget.
     Dead,
 
     /// Fail the task immediately: a non-retryable class, or any failure of

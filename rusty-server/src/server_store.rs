@@ -82,7 +82,9 @@ use crate::policy::{self, PolicyActivation, PolicyBinding, PolicyRecord, PolicyW
 use crate::receipts::ReceiptKeyRecord;
 use crate::registry;
 use crate::store::{self, StoreItem};
-use crate::tasks::{self, CancelOutcome, MutationOutcome, RunCancellation, TaskRecord, TaskStatus};
+use crate::tasks::{
+    self, CancelOutcome, MutationOutcome, RedriveOutcome, RunCancellation, TaskRecord, TaskStatus,
+};
 use crate::threads::{self, ThreadRecord};
 use crate::triggers::{self, TriggerEventRecord, TriggerRecord};
 
@@ -489,6 +491,17 @@ pub(crate) trait ServerStore: Send + Sync {
         task_id: &str,
         now: chrono::DateTime<chrono::Utc>,
     ) -> StoreResult<CancelOutcome>;
+    /// Re-drive a dead-lettered task (control-plane operation, not
+    /// lease-guarded, same posture as [`ServerStore::cancel_task`]): the
+    /// task returns to `queued` with its attempt history intact — one
+    /// more attempt, not a fresh budget (see [`TaskRecord::redrive`]).
+    /// Tasks not in the DLQ answer [`RedriveOutcome::NotDead`].
+    async fn redrive_task(
+        &self,
+        tenant: &str,
+        task_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<RedriveOutcome>;
     /// Cancel every non-terminal task of one run (tenant-scoped), the
     /// run-level propagation of `POST /runs/{run_id}/cancel`. Applies the
     /// same two transitions as [`ServerStore::cancel_task`] and returns
@@ -2718,6 +2731,31 @@ impl ServerStore for JsonFileStore {
         Ok(CancelOutcome::Applied(Box::new(task)))
     }
 
+    async fn redrive_task(
+        &self,
+        tenant: &str,
+        task_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StoreResult<RedriveOutcome> {
+        let mut map = self.tasks.lock().await;
+        let Some(current) = map.get(task_id) else {
+            return Ok(RedriveOutcome::Unknown);
+        };
+        // Cross-tenant ids are indistinguishable from unknown ones (404).
+        if current.tenant != tenant {
+            return Ok(RedriveOutcome::Unknown);
+        }
+        let mut task = current.clone();
+        if !task.redrive(now) {
+            return Ok(RedriveOutcome::NotDead(task.status));
+        }
+        tasks::persist(&self.root, &task)
+            .await
+            .map_err(io_err("persist task"))?;
+        map.insert(task_id.to_string(), task.clone());
+        Ok(RedriveOutcome::Applied(Box::new(task)))
+    }
+
     async fn cancel_run_tasks(
         &self,
         tenant: &str,
@@ -4342,7 +4380,8 @@ mod postgres {
     use crate::receipts::ReceiptKeyRecord;
     use crate::store::StoreItem;
     use crate::tasks::{
-        self, CancelOutcome, MutationOutcome, RunCancellation, TaskLease, TaskRecord, TaskStatus,
+        self, CancelOutcome, MutationOutcome, RedriveOutcome, RunCancellation, TaskLease,
+        TaskRecord, TaskStatus,
     };
     use crate::threads::ThreadRecord;
     use crate::triggers::{TriggerEventRecord, TriggerRecord};
@@ -5514,6 +5553,21 @@ mod postgres {
         SET status = $2, error_class = $3, cancel_requested = $4,
             lease_owner = $5, lease_expires_at = $6,
             next_attempt_at = $7, updated_at = $8
+        WHERE task_id = $1
+        RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
+            attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
+            run_id, thread_id, cancel_requested, deadline, receipt, worker_version, recipient, parent, tokens, cost_usd, next_attempt_at, created_at, updated_at, \
+            parent_task_id, stage, status_category";
+
+    /// Re-drive (`POST /tasks/{id}/redrive`), applied to the row locked
+    /// with [`CANCEL_SELECT_SQL`]: the dead-lettered task returns to
+    /// `queued` with its attempt history intact — one more attempt, not a
+    /// fresh budget. `error_class`/`last_error` stay as evidence of what
+    /// killed it.
+    pub(crate) const REDRIVE_UPDATE_SQL: &str = "
+        UPDATE server_tasks
+        SET status = 'queued', status_category = 'todo', lease_owner = NULL,
+            lease_expires_at = NULL, next_attempt_at = NULL, updated_at = $2
         WHERE task_id = $1
         RETURNING task_id, tenant, kind, payload, pool, status, lease_owner, lease_expires_at, \
             attempt, max_attempts, error_class, effect, last_error, idempotency_key, result, \
@@ -7856,6 +7910,42 @@ mod postgres {
                 .map_err(db_err("cancel task"))?;
             tx.commit().await.map_err(db_err("cancel task"))?;
             Ok(CancelOutcome::Applied(Box::new(task_from_row(&updated)?)))
+        }
+
+        async fn redrive_task(
+            &self,
+            tenant: &str,
+            task_id: &str,
+            now: DateTime<Utc>,
+        ) -> StoreResult<RedriveOutcome> {
+            let pool = self.pool().await?;
+            let mut tx = pool.begin().await.map_err(db_err("redrive task"))?;
+            let locked = sqlx::query(CANCEL_SELECT_SQL)
+                .bind(task_id)
+                .bind(tenant)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err("redrive task"))?;
+            let Some(locked) = locked else {
+                tx.rollback().await.map_err(db_err("redrive task"))?;
+                return Ok(RedriveOutcome::Unknown);
+            };
+            let mut task = task_from_row(&locked)?;
+            // Same record logic the file backend runs (one rule, one test
+            // surface): only a `dead` task re-drives.
+            if !task.redrive(now) {
+                let status = task.status;
+                tx.rollback().await.map_err(db_err("redrive task"))?;
+                return Ok(RedriveOutcome::NotDead(status));
+            }
+            let updated = sqlx::query(REDRIVE_UPDATE_SQL)
+                .bind(&task.task_id)
+                .bind(now)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err("redrive task"))?;
+            tx.commit().await.map_err(db_err("redrive task"))?;
+            Ok(RedriveOutcome::Applied(Box::new(task_from_row(&updated)?)))
         }
 
         async fn cancel_run_tasks(

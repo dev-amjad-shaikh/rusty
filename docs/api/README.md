@@ -5,10 +5,10 @@ builder surface: health and discovery, auth, threads, runs, assistants,
 connectors, skills, knowledge, memory, and evaluation (datasets +
 experiments).
 
-## Coverage — 56 of 296 routes today
+## Coverage — 56 of 297 routes today
 
-The server currently serves **296 routes** across roughly 55 resource
-families (the authorization scope table declares 360 method+path pairs,
+The server currently serves **297 routes** across roughly 55 resource
+families (the authorization scope table declares 361 method+path pairs,
 which includes management surfaces mounted outside the core router). This
 spec deliberately covers the core first (56 operations on 49 paths).
 Undocumented today:

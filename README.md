@@ -188,7 +188,7 @@ Step-by-step guides to everything above — building an agent, a skill, a tool, 
 ## Documentation
 
 - [docs/building-agentic-products.md](docs/building-agentic-products.md) — what Rusty is precisely, the five-concept mental model, and the product-building path from local graph to deployed binary.
-- [docs/api/](docs/api/README.md) — the server's core HTTP surface as an OpenAPI 3.1 spec: threads, runs, assistants, connectors, skills, knowledge, memory, evaluation. Covers 56 of the server's 296 routes today — the coverage note in that folder lists what is still undocumented.
+- [docs/api/](docs/api/README.md) — the server's core HTTP surface as an OpenAPI 3.1 spec: threads, runs, assistants, connectors, skills, knowledge, memory, evaluation. Covers 56 of the server's 297 routes today — the coverage note in that folder lists what is still undocumented.
 - [docs/architecture.md](docs/architecture.md) — the anatomy deep-dive: how one run flows through the engine, eight diagrams, the named failure modes.
 - [docs/how-to.md](docs/how-to.md) — build an agent, a skill, a tool, and add a connector, step by step, in Rusty Studio.
 - [docs/server-quickstart.md](docs/server-quickstart.md) — zero to a served graph with interrupt/resume over HTTP in ten minutes.
