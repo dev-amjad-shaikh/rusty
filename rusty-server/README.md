@@ -2,9 +2,9 @@
 
 **The network face of [`rusty-agent-runtime`](../rusty-core)** — serve your agent graphs over HTTP + SSE from a single static binary. No interpreter, no Postgres, no Redis. Dual-licensed under MIT OR Apache-2.0.
 
-> **Status: v0.5, under active development.** The crate ships as a *library*: you call `rusty_agent_server::serve()` from your own `main.rs`. The endpoint set, streaming semantics, and config surface follow the architecture document in [`docs/rusty-server-design.md`](../docs/rusty-server-design.md). The core `rusty-agent-runtime` crate is untouched — it has no HTTP, no axum, no server dependencies, and never learns that a server exists.
-
-> **New in v0.5 — the Flight Recorder surface.** Every run is journaled (core R0.5 kernel): the server attaches a journal to the executor at run start, persists its snapshot at every checkpoint boundary and at run completion (`{store_path}/journals/{run_id}.json`, or the auto-migrated `server_journals` table on Postgres), and serves it read-only via `GET /runs/{run_id}/events` — fetchable by run id even after the run's in-memory record is evicted or the process restarts. On top of that: `GET /runs/{run_id}/fixture` (portable CI replay bundle), `POST /runs/replay` (server-side exact replay with evidence verification), and `GET /runs/diff` (branch diff of two runs' journals). Fully additive — no breaking changes in this version.
+> **Status: v0.12, under active development.** The crate ships as a *library*: you call `rusty_agent_server::serve()` from your own `main.rs`. The endpoint set, streaming semantics, and config surface follow the architecture document in [`docs/rusty-server-design.md`](../docs/rusty-server-design.md). The core `rusty-agent-runtime` crate is untouched — it has no HTTP, no axum, no server dependencies, and never learns that a server exists.
+>
+> **The Flight Recorder surface.** Every run is journaled: the server attaches a journal to the executor at run start, persists its snapshot at every checkpoint boundary and at run completion (`{store_path}/journals/{run_id}.json`, or the auto-migrated `server_journals` table on Postgres), and serves it read-only via `GET /runs/{run_id}/events` — fetchable by run id even after the run's in-memory record is evicted or the process restarts. On top of that: `GET /runs/{run_id}/fixture` (portable CI replay bundle), `POST /runs/replay` (server-side exact replay with evidence verification), and `GET /runs/diff` (branch diff of two runs' journals).
 
 ## Why one binary instead of three containers
 
@@ -88,7 +88,7 @@ A `GraphRegistry` entry is a name plus the two things the executor needs — a `
 
 ## HTTP API
 
-An Agent-Protocol-compatible subset — wire-compatible with the core run/thread shapes LangGraph Platform uses, without the commercial surface. This table is the v0.5 endpoint inventory; everything listed here is implemented and covered by integration tests.
+An Agent-Protocol-compatible subset — wire-compatible with the core run/thread shapes LangGraph Platform uses, without the commercial surface. This table is the core endpoint inventory; everything listed here is implemented and covered by integration tests. The full surface is much larger — deployments, tasks, capsules, knowledge, evaluation, policy, and more; [docs/api/](../docs/api/README.md) carries an OpenAPI spec of the core with an honest coverage note.
 
 | Endpoint | Description |
 |---|---|
@@ -117,7 +117,7 @@ An Agent-Protocol-compatible subset — wire-compatible with the core run/thread
 | `GET /store/{ns}/{key}` / `DELETE /store/{ns}/{key}` | Fetch / delete one item (`404` when absent) |
 | `GET /store/{ns}` | List a namespace's items, sorted by key (empty array for an unwritten namespace) |
 
-Not in v0.5 (roadmap, see below): thread listing/deletion endpoints, `/metrics`, `/graphs`, the replay-POST Flight Recorder endpoint, and the gRPC worker protocol. Thread records **are** durable: each thread persists as one JSON file under `{store_path}/threads/` (or in the `server_threads` table with [Postgres persistence](#postgres-persistence-feature-postgres)) and reloads on startup — persistence is what makes the checkpoint durability story reachable through the API, since a restart that forgot the thread records would 404 every pre-restart thread while its checkpoints sat orphaned on disk. Assistants, crons, and store items are likewise durable (JSON files under `store_path`, or the `server_*` tables) and reload on startup.
+Thread records **are** durable: each thread persists as one JSON file under `{store_path}/threads/` (or in the `server_threads` table with [Postgres persistence](#postgres-persistence-feature-postgres)) and reloads on startup — persistence is what makes the checkpoint durability story reachable through the API, since a restart that forgot the thread records would 404 every pre-restart thread while its checkpoints sat orphaned on disk. Assistants, crons, and store items are likewise durable (JSON files under `store_path`, or the `server_*` tables) and reload on startup.
 
 **Run-create payload** (subset of LangGraph's shape):
 
@@ -288,7 +288,7 @@ let config = ServerConfig::new("0.0.0.0:8080".parse()?, "./data/checkpoints")
 | KV store | `{store_path}/store/{ns}/{key}.json` | table `server_kv` (`namespace` + `"key"` primary key, JSONB `value`, `created_at`/`updated_at`) |
 | Run journals | `{store_path}/journals/{run_id}.json` | table `server_journals` (`run_id` primary key, JSONB snapshot, `created_at`/`updated_at`) |
 
-All six schemas (`rusty_checkpoints` plus the five `server_*` tables) are **auto-migrated** (`CREATE TABLE IF NOT EXISTS …`) on connect; connections are established lazily on first use, so `router()` stays synchronous and the server starts even if the database is briefly unreachable (first-touch failures surface as `500`s until Postgres is back). The HTTP surface is identical either way — `GET /info` reports `"checkpointer": "postgres"` when enabled — with one deliberate exception: rollback (`DELETE /threads/{id}/runs/{run_id}`) answers `409` on the Postgres backend rather than silently deleting nothing (the `Checkpointer` trait has no delete operation, so removal goes through the JSON-file layout directly). Everything else — fork, replay, crons, thread durability across restarts, the KV store, and journal persistence — runs the same code paths against the `ServerStore` / `Checkpointer` traits.
+All schemas — `rusty_checkpoints` plus the `server_*` table family, which has grown well past the half-dozen listed above as the platform surface expanded — are **auto-migrated** (`CREATE TABLE IF NOT EXISTS …`) on connect; connections are established lazily on first use, so `router()` stays synchronous and the server starts even if the database is briefly unreachable (first-touch failures surface as `500`s until Postgres is back). The HTTP surface is identical either way — `GET /info` reports `"checkpointer": "postgres"` when enabled — with one deliberate exception: rollback (`DELETE /threads/{id}/runs/{run_id}`) answers `409` on the Postgres backend rather than silently deleting nothing (the `Checkpointer` trait has no delete operation, so removal goes through the JSON-file layout directly). Everything else — fork, replay, crons, thread durability across restarts, the KV store, and journal persistence — runs the same code paths against the `ServerStore` / `Checkpointer` traits.
 
 The live-Postgres integration tests are gated and skipped by default; run them against a scratch database with:
 
@@ -331,7 +331,7 @@ What this buys you:
 
 ## Configuration
 
-Configuration is code, via `ServerConfig` (constructed with `ServerConfig::new(bind_addr, store_path)` plus builder methods, or `ServerConfig::default()`). If you want twelve-factor env-based config in your binary, read the environment in your own `main.rs` and build the `ServerConfig` from it — the crate deliberately does not read process env itself.
+Configuration is code, via `ServerConfig` (constructed with `ServerConfig::new(bind_addr, store_path)` plus builder methods, or `ServerConfig::default()`). Two environment variables are the sanctioned exception: `ServerConfig::default()` reads `RUSTY_PUBLIC_URL` (the origin OAuth providers redirect back to) and `RUSTY_ENV=production` opts a deployment into production mode — refused without authentication. Beyond those, if you want twelve-factor env-based config in your binary, read the environment in your own `main.rs` and build the `ServerConfig` from it. The bundled `server_demo` example reads several more (`RUSTY_OPEN`, `RUSTY_BACKUP_DIR`, `RUSTY_ASK_WAIT_SECS`, …) — those are the demo's choices, not the crate's.
 
 | Field / builder | Default | Purpose |
 |---|---|---|
@@ -353,26 +353,30 @@ Configuration is code, via `ServerConfig` (constructed with `ServerConfig::new(b
 
 ## Deployment
 
-Build one static binary:
+Build one binary:
 
 ```bash
 cargo build --release
-# -> target/release/my-agent   (statically linked; the bundled server_demo
+# -> target/release/my-agent   (the bundled server_demo
 #    measures ~5 MB as a macOS release build — feature sets shift the size)
 ```
 
-Ship it in a scratch image — no interpreter, no pip layer, no system Python:
+Ship it in a minimal image — no interpreter, no pip layer, no system Python. A default `cargo build --release` produces a **glibc dynamically linked** binary, which will not run on `scratch`; either build a static musl binary or use a base that carries the C runtime:
 
 ```dockerfile
 FROM rust:1-bookworm AS build
 WORKDIR /app
 COPY . .
-RUN cargo build --release
+# Static musl binary — runs on scratch/distroless-static
+RUN rustup target add x86_64-unknown-linux-musl \
+    && cargo build --release --target x86_64-unknown-linux-musl
 
 FROM scratch                       # or gcr.io/distroless/static
-COPY --from=build /app/target/release/my-agent /my-agent
+COPY --from=build /app/target/x86_64-unknown-linux-musl/release/my-agent /my-agent
 ENTRYPOINT ["/my-agent"]
 ```
+
+Keeping the default glibc build works too — just swap the final stage for `gcr.io/distroless/cc` (or `debian:bookworm-slim`), which carries the runtime libraries the binary links against.
 
 ## curl quickstart
 
@@ -383,7 +387,7 @@ With the server running locally in dev mode (no API key configured):
 curl localhost:8080/ok
 # {"ok":true}
 curl localhost:8080/info
-# {"service":"rusty-server","version":"0.5.0","checkpointer":"json_file",
+# {"service":"rusty-server","version":"0.12.0","checkpointer":"json_file",
 #  "store_path":"./data/checkpoints",
 #  "graphs":[{"name":"react_agent","channels":["messages"]}]}
 
@@ -474,19 +478,16 @@ curl -X DELETE localhost:8080/store/memories/user-1
 
 With auth configured, add `-H "X-Api-Key: $KEY"` to every call. For a full walkthrough — project scaffolding, a two-node graph, streaming, and a complete interrupt/resume round trip — see **[docs/server-quickstart.md](../docs/server-quickstart.md)**.
 
-## Roadmap
+## History and roadmap
 
-- [x] **Phase A — the server crate (v0.1).** `GraphRegistry`, the thread/run/SSE endpoint set, per-thread run queue with `multitask_strategy` (`enqueue` / `reject`) plus explicit rollback via `DELETE /threads/{id}/runs/{run_id}`, SSE with mode filters (`updates` / `values` / `messages`) + per-run event log + `Last-Event-ID` dedup, static API-key middleware, `JsonFileCheckpointer` wiring from `ServerConfig::store_path`. *Implemented.*
-- [x] **Phase C (partial) — platform surface (v0.2).** `GET /runs/{run_id}` status polling, **assistants** (named graph + config aliases, JSON-persisted, `assistant_id` on run-create), **crons** (interval or 5-field cron schedules, durable records, background tokio scheduler firing runs on fresh threads, `on_run_completed: keep|delete`), and the cross-thread **KV store** (`/store/{namespace}/{key}`, JSON-file-backed). *Implemented.*
-- [x] **Phase C (continued) — time travel + Postgres persistence (v0.3).** `POST /threads/{id}/fork` (full- or mid-history forks via core's `Checkpointer::fork_thread`), checkpoint replay on all run endpoints (`"checkpoint": {"checkpoint_id": …}` → `RunConfig::with_checkpoint_id`), and the `postgres` feature: `ServerConfig::with_postgres(url)` switches the run checkpointer to `PostgresCheckpointer` and the assistants/crons/KV surface to auto-migrated `server_assistants` / `server_crons` / `server_kv` tables behind a `ServerStore` trait. *Implemented.*
-- [x] **Phase C (continued) — permissive CORS (v0.3).** `router()` layers `tower_http::cors::CorsLayer::permissive()`, so browser clients (the [Studio](../studio/)) call the API cross-origin; preflights are answered before auth. Restrict for production — see [CORS](#http-api). *Implemented.*
-- [x] **Phase C (continued) — multi-tenancy (v0.4).** API keys map to tenants (`with_tenant_key(tenant, key)`; legacy `with_api_key` = the `default` tenant); threads + checkpoints, runs, assistants, crons, and KV namespaces are fully isolated via internal `{tenant}/` id prefixing, with cross-tenant access answering 404 (never 403). Open mode and the default tenant keep the legacy flat storage layout. See [Multi-tenancy](#multi-tenancy-api-keys--tenants-with-full-isolation). *Implemented.*
-- [x] **Phase C (continued) — hardening (v0.4).** Durable thread records (`threads/` JSON files / `server_threads` table — pre-restart checkpoints stay reachable through the API), the SSE attach endpoint (`GET /runs/{id}/stream` with `Last-Event-ID` replay), rollback guards (`409` on the Postgres backend, on busy threads, and on mid-history suffix violations), the cron `interval_secs` clamp (≤ 1 year) + one-shot tombstones, reserved layout names rejected as client-chosen ids, the 1024-run retention cap, the 3600 s blocking-wait ceiling (`504`), and `400` for unknown history `before` cursors. *Implemented.*
-- [x] **R0.5 — Flight Recorder read surface (v0.5).** Every run is journaled by the executor (core R0.5 kernel); the server persists the journal snapshot at every checkpoint boundary and at run completion (`{store_path}/journals/{run_id}.json`, or the auto-migrated `server_journals` table on Postgres) and serves it via `GET /runs/{run_id}/events` → `{run_id, events, complete}` in the golden-pinned `RunEvent` wire shape, with head-hash re-verification on read and 404/tenant-isolation semantics identical to `GET /runs/{id}`. `GET /runs/{run_id}/fixture` downloads the run as a portable `ReplayFixture` for CI replay. SDK parity: `run_events(run_id)` (Python) / `runEvents(runId)` (TypeScript). *Implemented — the replay-POST endpoint lands in a later R0.5 wave.*
-- [ ] **Phase B — gRPC worker protocol (`rusty-proto`).** `RemoteNode`: a gRPC client behind the same `Node` trait, delegating node execution to stateless out-of-process workers that long-poll named node-queues. The server keeps checkpoints, super-step scheduling, interrupts, and stream fan-out. Agent nodes are dominated by LLM latency (hundreds of ms to minutes), so a 1–5 ms gRPC hop is <1% overhead — and since `State` is already a JSON map, the wire boundary is lossless. Crash isolation, polyglot workers (a Python worker can host the LangChain ecosystem while Rust owns orchestration), and independent scaling of tool-heavy nodes follow.
-- [ ] **Phase C (remainder).** Thread listing/deletion endpoints, `/metrics`, and `/graphs`. (`WasmNode` is implemented in core `rusty-agent-runtime` v0.4 behind the `wasm` feature — register a Wasm-backed graph and this crate serves it unchanged.)
+Everything through the current release is implemented above and recorded in
+[CHANGELOG.md](../CHANGELOG.md); what comes next lives in
+[docs/roadmap.md](../docs/roadmap.md). One long-standing idea remains deliberately
+deferred: a gRPC worker protocol (`rusty-proto`) — `RemoteNode` over HTTP covers
+out-of-process workers today, and agent nodes are dominated by model latency, so
+the wire hop is not the bottleneck.
 
-Deliberately skipped: A2A/MCP server endpoints and WebSocket "protocol v2" (SSE + HTTP sidecar is sufficient), and `feedback_keys` (LangSmith-tracing coupling we don't have).
+Deliberately skipped: WebSocket "protocol v2" (SSE + HTTP sidecar is sufficient), and `feedback_keys` (LangSmith-tracing coupling we don't have).
 
 ## License
 
