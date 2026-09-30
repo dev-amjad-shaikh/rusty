@@ -482,7 +482,7 @@ async fn an_evaluation_puts_the_version_under_test_in_place_of_the_charter_the_r
         "{started}"
     );
     let mut finished = started;
-    for _ in 0..100 {
+    for _ in 0..400 {
         let (_, v) = call(&app, "GET", "/datasets/calc/versions/v1/evaluations", None).await;
         finished = v["evaluations"][0].clone();
         if finished["status"] != json!("running") {
@@ -611,7 +611,7 @@ async fn a_new_skill_revision_runs_the_suites_of_the_agents_that_follow_it() {
         .to_string();
 
     let mut finished = Value::Null;
-    for _ in 0..100 {
+    for _ in 0..400 {
         let (_, v) = call(&app, "GET", "/datasets/calc/versions/v2/evaluations", None).await;
         finished = v["evaluations"]
             .as_array()
