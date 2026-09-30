@@ -185,7 +185,10 @@ async fn run_react() -> Result<()> {
                 let requests = value["requests"].as_array().cloned().unwrap_or_default();
                 let mut tokens = Vec::with_capacity(requests.len());
                 for req in &requests {
-                    println!("[react] approving {} [call {}]", req["tool"], req["call_id"]);
+                    println!(
+                        "[react] approving {} [call {}]",
+                        req["tool"], req["call_id"]
+                    );
                     let effect_id: EffectId = serde_json::from_value(req["effect_id"].clone())?;
                     tokens.push(ApprovalToken::approve(effect_id, "otel-demo"));
                 }

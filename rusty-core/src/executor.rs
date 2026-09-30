@@ -2678,12 +2678,7 @@ mod tests {
         let graph = builder.compile().unwrap();
 
         let outcome = Executor::new()
-            .run(
-                &graph,
-                &spec,
-                State::new(),
-                RunConfig::new("t-send-order"),
-            )
+            .run(&graph, &spec, State::new(), RunConfig::new("t-send-order"))
             .await
             .unwrap();
         let ExecutionOutcome::Done(state) = outcome else {

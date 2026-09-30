@@ -373,7 +373,11 @@ async fn postgres_redrive_matches_the_file_backends_semantics() {
         Some(json!({"worker_id": "pg-worker-2", "pools": [pool], "lease_ms": 60_000})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "re-driven task must be claimable: {v}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "re-driven task must be claimable: {v}"
+    );
     assert_eq!(v["task"]["task_id"], json!(task_id));
     let (status, v) = call(
         &app,

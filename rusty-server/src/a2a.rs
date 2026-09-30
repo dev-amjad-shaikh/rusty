@@ -796,8 +796,7 @@ async fn execute_capsule_task(state: &Arc<AppState>, tenant: &str, task: &TaskRe
         .get("requires")
         .and_then(Value::as_array)
         .is_some_and(|r| r.iter().any(|v| v.as_str() == Some("filesystem")));
-    if requires_fs && !any_grant_of_kind(&manifest.capabilities, CapabilityKind::Filesystem)
-    {
+    if requires_fs && !any_grant_of_kind(&manifest.capabilities, CapabilityKind::Filesystem) {
         let denial = CapsuleDenial::unscoped(
             record.capsule_id.clone(),
             CapabilityKind::Filesystem,

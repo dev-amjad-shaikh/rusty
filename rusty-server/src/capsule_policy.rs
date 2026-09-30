@@ -427,8 +427,8 @@ pub use engine::{CapsulePolicyError, CapsulePolicyPlane};
 pub(crate) use engine::{
     activation, authorize_overlay_attach, authorize_registration, compose_admission,
     derive_capsule_policy_version, load_config_policies, narrow_effective_grants,
-    preload_active_policies, prospective_record, validate_capsule_policy_version,
-    AdmissionRefusal, CedarEngine,
+    preload_active_policies, prospective_record, validate_capsule_policy_version, AdmissionRefusal,
+    CedarEngine,
 };
 
 #[cfg(feature = "capsules")]
@@ -1088,8 +1088,9 @@ mod engine {
         let mut applied = Vec::new();
         for overlay_record in &tenant_overlays {
             if overlay_record.overlay.applies_to(&manifest.identity.name) {
-                manifest.capabilities =
-                    overlay_record.overlay.effective_grants(&manifest.capabilities);
+                manifest.capabilities = overlay_record
+                    .overlay
+                    .effective_grants(&manifest.capabilities);
                 applied.push(overlay_record.overlay.name.clone());
             }
         }
