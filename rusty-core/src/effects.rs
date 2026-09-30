@@ -440,7 +440,8 @@ pub struct ApprovalToken {
 
     /// Who approved — a human operator id, a policy name, a supervision
     /// decision reference. Evidence, not authentication: recorded so the
-    /// journal can attribute the boundary when approval journaling lands.
+    /// journal's approval pair (`ApprovalAsked` / `ApprovalDecided`)
+    /// attributes the boundary to someone.
     approved_by: String,
 }
 

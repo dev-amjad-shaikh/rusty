@@ -105,10 +105,11 @@ pub enum ErrorClass {
     Cancelled,
 
     /// The failure could not be classified — the handler returned an
-    /// unclassified error, or the worker died mid-attempt (lease expiry
-    /// classifies here). Retried with backoff up to the attempt limit, then
-    /// dead-lettered: unknown failures are the DLQ's primary input, since
-    /// they are the ones that need human eyes.
+    /// unclassified error. Retried with backoff up to the attempt limit,
+    /// then dead-lettered: unknown failures are the DLQ's primary input,
+    /// since they are the ones that need human eyes. A worker dying
+    /// mid-attempt never enters this taxonomy: its lease lapses and the
+    /// scheduler hands the task to the next claimant as a fresh attempt.
     Unknown,
 }
 
@@ -212,9 +213,11 @@ pub fn backoff_delay_ms_with(attempt: u32, uniform: f64, base_ms: u64, cap_ms: u
 
 /// Map a failed attempt to exactly one [`RetryDecision`].
 ///
-/// This is the single place the retry policy lives, shared verbatim by the
-/// server scheduler and the worker SDK so both sides of the queue always
-/// agree. It decides with the static floor's constants — the read path
+/// This is the single place the retry policy lives. Only the server
+/// scheduler runs it — the worker SDK's part of the contract is the shared
+/// [`ErrorClass`] taxonomy it reports failures in — so both sides of the
+/// queue always agree on what a class means while one side decides. It
+/// decides with the static floor's constants — the read path
 /// every decision falls back to when no learned policy is in force
 /// (R0.10 wave 3's application loop is [`classify_retry_with_policy`],
 /// which this delegates to with the floor's parameters). The order of the

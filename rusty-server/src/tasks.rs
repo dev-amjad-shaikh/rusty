@@ -12,8 +12,9 @@
 //! elapsed whole-task deadlines instead of re-leasing. The retry policy is
 //! not local: failed attempts are
 //! classified into core's shared [`ErrorClass`] taxonomy and decided by
-//! core's [`classify_retry_with_policy`] — the same classifier the worker
-//! SDK runs — against the acting executor policy's resolved retry
+//! core's [`classify_retry_with_policy`] — the worker SDK reports failures
+//! in the same taxonomy, and only the server runs the classifier — against
+//! the acting executor policy's resolved retry
 //! parameters (R0.10 wave 4; the static floor resolves to exactly the
 //! pre-wave-4 constants), so
 //! server and workers can never disagree about a retry (see

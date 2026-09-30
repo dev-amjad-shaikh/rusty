@@ -9206,8 +9206,11 @@ struct FailTaskPayload {
     error_class: String,
     /// The failure message, stored as the task's `last_error`.
     message: String,
-    /// The worker's permanence judgment: `false` dead-letters immediately,
-    /// regardless of remaining attempts.
+    /// The worker's permanence judgment: `false` declares re-driving the
+    /// same input unsafe, so the effect gate fails the task outright —
+    /// terminal `failed`, never retried, never dead-lettered (the DLQ is
+    /// for actionable work; there is nothing a human can fix by re-driving
+    /// an input the worker called unsafe).
     retryable: bool,
     /// Settlement cost evidence (R0.7 wave 3): what the failed attempt
     /// consumed, when the worker knows. A race loser's reported waste
