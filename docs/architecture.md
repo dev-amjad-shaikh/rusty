@@ -62,7 +62,7 @@ Strip the platform down and four primitives remain. Each exists to kill a specif
 
 ## 3. One run, end to end
 
-A call to [`Executor::run`](../rusty-core/src/executor.rs) restores-or-seeds state, then loops [`execute_super_step`](../rusty-core/src/executor.rs) until routing yields an empty next set (`Done`), a node interrupts (`Interrupted`), or `max_steps` trips (error).
+A call to [`Executor::run`](../rusty-core/src/executor.rs) restores-or-seeds state, then loops [`execute_super_step`](../rusty-core/src/executor.rs) until routing yields an empty next set (`Done`), a node interrupts (`Interrupted`), or `max_steps` trips — which also suspends (`Interrupted`, reason `step_ceiling`) rather than failing, so the work is kept and the run can be resumed with a higher ceiling.
 
 ```mermaid
 sequenceDiagram
@@ -130,7 +130,7 @@ let node_span = tracing::info_span!("rusty.node", node = %name, step = step);
 join_set.spawn(async move { (name, node.run(ctx).await) }.instrument(node_span));
 ```
 
-The barrier (rusty-core/src/executor.rs) drains the JoinSet. Three outcomes per node: success (updates and any `Command` are collected), failure (the JoinSet is dropped, aborting stragglers, and the whole step's writes are discarded — the step is transactional), or interrupt (the run suspends; see 4f). Only after the barrier does the merge of 4a run, then routing of 4d, then the boundary checkpoint of 4e. Node failures are classified for observability: LLM and tool errors are the transient, retryable classes; everything else is a hard failure (rusty-core/src/executor.rs). The guard against runaway cycles is checked before each step: after `max_steps` super-steps without termination the run aborts with a `Graph` error naming the likely cause — an infinite cycle or a missing terminating route (rusty-core/src/executor.rs).
+The barrier (rusty-core/src/executor.rs) drains the JoinSet. Three outcomes per node: success (updates and any `Command` are collected), failure (the JoinSet is dropped, aborting stragglers, and the whole step's writes are discarded — the step is transactional), or interrupt (the run suspends; see 4f). Only after the barrier does the merge of 4a run, then routing of 4d, then the boundary checkpoint of 4e. Node failures are classified for observability: LLM and tool errors are the transient, retryable classes; everything else is a hard failure (rusty-core/src/executor.rs). The guard against runaway cycles is checked before each step: after `max_steps` super-steps without termination the run **suspends** — `Interrupted` with a `rusty.halted` payload (`reason: "step_ceiling"`), carrying the state it reached and resumable with a higher `RunConfig::max_steps` when the task genuinely needs more steps (rusty-core/src/executor.rs; pinned by `max_steps_guard_suspends_infinite_cycles_at_the_ceiling`).
 
 ### 4d. Routing — three kinds of "what runs next"
 
@@ -175,12 +175,21 @@ The [`Checkpointer` trait](../rusty-core/src/checkpoint.rs) is five methods: `pu
 
 ```rust
 if let Some(checkpointer) = &self.checkpointer {
-    let next_names: Vec<String> = next.iter().map(|t| t.name.clone()).collect();
-    let checkpoint =
-        Checkpoint::new(config.thread_id.clone(), step, state.clone(), next_names);
+    let stamp = config.inbox.as_ref().and_then(|inbox| inbox.snapshot());
+    let checkpoint = recorder.mint_checkpoint(
+        config.thread_id.clone(),
+        step,
+        state.clone(),
+        next.iter().map(|t| t.name.clone()).collect(),
+        stamp,
+    );
     let checkpoint_id = checkpoint.id.clone();
     checkpointer.put(checkpoint).await?;
 ```
+
+The recorder mints the checkpoint (rather than the executor constructing one
+directly) so the id, the journal linkage, and the inbox stamp are produced in
+one place — the write and the evidence never disagree.
 
 Time travel is two operations. `fork_thread(src, dst, at_checkpoint_id)` copies a thread's history — oldest first, full or truncated at a checkpoint — into a new thread id (rusty-core/src/checkpoint.rs). `RunConfig::with_checkpoint_id(id)` then starts a run from that checkpoint's state and next-node set instead of the latest (rusty-core/src/executor.rs). The safe pattern is fork first, replay on the fork: replaying on the original thread appends new history on top of the old timeline, which is legal — `get_latest` defines recency by insertion order, not step number, precisely so a later resume continues the newest timeline (rusty-core/src/checkpoint.rs) — but usually not what you want.
 
@@ -448,7 +457,7 @@ Agent systems fail in a small number of characteristic ways. Each row names one,
 | **A tool throws or panics** | Contained per call: the batch returns an `ERROR:` tool message in that call's slot, in order, and the model sees the failure as data (rusty-core/src/tool.rs). |
 | **A second run arrives on a busy thread** | One active run per thread, enforced by the `RunManager`: `reject` answers 409; `enqueue` (default) queues FIFO up to the configured depth, then 409 (rusty-server/src/runs.rs). |
 | **Replay leaves a stale "latest" head** | Recency is insertion order, not step number: replay appends a new timeline and resume follows it; deterministic `(step, created_at, id)` listing keeps fork truncation stable across backends (rusty-core/src/checkpoint.rs). The safe pattern is fork first, replay on the fork. |
-| **A runaway graph cycle** | A cycle is re-scheduling, not recursion, so the guard is a step budget: `max_steps` (default 1000) aborts with an error naming the likely infinite cycle (rusty-core/src/executor.rs). |
+| **A runaway graph cycle** | A cycle is re-scheduling, not recursion, so the guard is a step budget: `max_steps` (default 1000) suspends the run at the ceiling — `Interrupted` with reason `step_ceiling`, work kept, resumable with a raised budget (rusty-core/src/executor.rs). |
 | **A guest WASM module loops forever or eats memory** | Fuel metering traps the loop; a `ResourceLimiter` rejects memory growth past the cap; the guest has no imports at all — no WASI, no host functions (rusty-core/src/wasm_node.rs). |
 | **A hostile MCP server declares a giant frame** | Inbound frames are capped at 16 MiB *before* any length-driven allocation; per-request timeouts bound waiting (rusty-core/src/mcp.rs). |
 | **A client probes another tenant's thread** | Tenant isolation is id namespacing: the foreign thread does not exist in your scope, so the answer is 404 (never 403 — existence is not leaked); malformed client ids are rejected 400 (rusty-server/src/routes.rs). |

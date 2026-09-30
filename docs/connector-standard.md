@@ -22,7 +22,7 @@ A manifest — one JSON document, content-hashed, registered on the server:
 | `base_url` | the API root, templated over config (`https://{instance}.service-now.com`) — https only, checked on the template and on the rendered URL |
 | `connection_specification` | JSON Schema draft-07: **everything** a connection needs |
 | `operations` | the calls, each with a method, path, params schema, effect, and auth alternatives |
-| `check` | the name of a parameterless read-only GET used as the setup gate |
+| `check` | the name of a parameterless read-only GET used by **Test connection** |
 | `hash` | SHA-256 of the canonical serialization of all of the above — **derived, never chosen** |
 
 Three properties follow from this and are worth naming:
@@ -32,8 +32,12 @@ Three properties follow from this and are worth naming:
   all read the *same* document. Nothing is written twice, so nothing drifts.
 - **Content addressing.** An instance points at a manifest hash. A manifest
   cannot change under a connection that was configured against it.
-- **The check is the gate.** A configuration is proven against the real system
-  before it is stored. "Saved" means "answered".
+- **The check is a probe, not a gate.** Storing an instance
+  (`POST /connectors/instances`) validates the config against the
+  `connection_specification` and seals its secrets; proving the configuration
+  against the real system is the separate `POST /connectors/check` call
+  (Studio's **Test connection** button). "Saved" means "validated and sealed";
+  "answered" is a deliberate second step.
 
 ## The rules
 
