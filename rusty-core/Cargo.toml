@@ -50,7 +50,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # features off — no async, no network resolution, no python bindings.
 jsonschema = { version = "0.49", default-features = false }
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json", "chrono"], optional = true }
-wasmtime = { version = "47", optional = true }
+wasmtime = { version = "48", optional = true }
 # Provider layer, wave 2 (docs/provider-layer-design.md): multi-provider
 # model access through the genai crate, behind the `genai` feature. genai is
 # taken WITHOUT its default `rustls-tls` feature: in genai's reqwest 0.13
