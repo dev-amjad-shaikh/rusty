@@ -24,7 +24,7 @@ info:
     name: MIT
     identifier: MIT
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8100
     description: local demo (scripts/dev.sh)
 tags:
   - name: health
@@ -208,12 +208,27 @@ paths:
   /threads/{thread_id}/history:
     post:
       tags: [threads]
-      summary: Append messages to the thread's durable history
+      summary: List the thread's checkpoints, newest first
+      description: |
+        Returns the thread's checkpoint history as a JSON array, newest
+        first. Each item carries `values` (the channel state at that step),
+        `next` (the next-node set), and a `checkpoint` reference. Optional
+        `limit` truncates the list; `before` (a checkpoint id) pages to
+        older entries and answers 400 on an unknown cursor.
       operationId: history
       parameters:
         - { $ref: "#/components/parameters/ThreadId" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit: { type: integer }
+                before: { type: string, description: "Return only checkpoints older than this checkpoint id" }
       responses:
-        "200": { description: Appended. }
+        "200": { description: Checkpoint list, newest first. }
+        "400": { description: Unknown `before` cursor. }
         "404":
           description: Unknown thread.
           content:
