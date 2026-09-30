@@ -6,7 +6,7 @@
   <a href="https://aboutrusty.com"><img src="docs/screenshots/aboutrusty-banner.png" alt="Rusty — build AI agents that don't lose their work · aboutrusty.com"></a>
 </p>
 
-[![CI](https://github.com/dev-amjad-shaikh/rusty/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-amjad-shaikh/rusty/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/dev-amjad-shaikh/rusty/ci.yml?branch=main&label=CI)](https://github.com/dev-amjad-shaikh/rusty/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE-MIT)
 [![Docs: architecture](https://img.shields.io/badge/docs-architecture-informational)](docs/architecture.md)
 
