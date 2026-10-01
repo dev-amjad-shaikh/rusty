@@ -110,6 +110,9 @@ pub(crate) fn render(title: &str, value: &Value, rows: usize) -> String {
             }
         }
     }
+    // Sorted, so the reference reads the same whether serde_json's map is a
+    // BTreeMap or insertion-ordered (the `preserve_order` feature).
+    columns.sort();
     out.push_str(&format!(
         "{} record(s){}.\n\n",
         list.len(),
@@ -433,7 +436,7 @@ mod tests {
         let table = render("Resolved", &answer, 1);
         assert!(table.contains("## Resolved"));
         assert!(table.contains("2 record(s), the first 1 shown"));
-        // Columns come out in key order, which serde keeps sorted.
+        // Columns come out sorted, whatever order the rows' keys declare.
         assert!(table.contains("| close_notes | number |"), "{table}");
         assert!(table.contains("Rebooted the \\| switch"));
         assert!(!table.contains("INC2"));

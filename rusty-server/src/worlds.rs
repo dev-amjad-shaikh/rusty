@@ -2790,7 +2790,10 @@ pub mod generic {
             );
             let mut fresh = json!({"tables": {}});
             ensure_tables(&mut fresh, &github_ops());
-            let tables: Vec<&String> = fresh["tables"].as_object().unwrap().keys().collect();
+            let mut tables: Vec<&String> = fresh["tables"].as_object().unwrap().keys().collect();
+            // Key order follows serde_json's map — sorted without
+            // `preserve_order`, insertion order with it — so compare sorted.
+            tables.sort();
             assert_eq!(tables, vec!["issues", "repos", "user"]);
         }
     }
